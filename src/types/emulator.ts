@@ -6,9 +6,13 @@ export type EmulatorStatus =
   | 'paused'
   | 'error';
 
-export type IsoVariant = 'generic' | 'eeepc';
+export type IsoVariant = 'generic' | 'eeepc' | 'android9';
 
-export type BootSourceType = 'builtin_generic' | 'builtin_eeepc' | 'custom_file';
+export type BootSourceType =
+  | 'builtin_generic'
+  | 'builtin_eeepc'
+  | 'builtin_android9'
+  | 'custom_file';
 
 export type WorkbenchTab = 'controls' | 'snapshots' | 'console' | 'images';
 
@@ -71,7 +75,7 @@ export interface VmSnapshotRecord extends VmSnapshotMeta {
 
 export interface EmulatorConfig {
   sourceType: BootSourceType;
-  memoryMb: 256 | 512;
+  memoryMb: 256 | 512 | 1024;
   vgaMemoryMb: 16 | 32;
   customFile: File | null;
   customMediaKind: 'cdrom' | 'hda';

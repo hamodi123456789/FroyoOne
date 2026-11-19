@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type {
   AndroidHardwareKey,
+  BootSourceType,
   EmulatorDisplayInfo,
   EmulatorStatus,
 } from '../types/emulator';
@@ -21,10 +22,12 @@ interface NexusOneShellProps {
   status: EmulatorStatus;
   statusDetail: string;
   errorMessage: string | null;
+  sourceType: BootSourceType;
   downloadProgress: { loaded: number; total: number; label: string } | null;
   displayInfo: EmulatorDisplayInfo;
   pointerLocked: boolean;
   onBoot: () => void;
+  onSelectSourceType: (source: BootSourceType) => void;
   onHardwareKey: (key: AndroidHardwareKey) => void;
   onLockPointer: () => void;
 }
@@ -38,10 +41,12 @@ export function NexusOneShell({
   status,
   statusDetail,
   errorMessage,
+  sourceType,
   downloadProgress,
   displayInfo,
   pointerLocked,
   onBoot,
+  onSelectSourceType,
   onHardwareKey,
   onLockPointer,
 }: NexusOneShellProps) {
@@ -193,7 +198,9 @@ export function NexusOneShell({
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-[#F1F5F9]">
-                          Caching Android 2.2 Image
+                          {sourceType === 'builtin_android9'
+                            ? 'Caching Android 9 Image'
+                            : 'Caching Android 2.2 Image'}
                         </p>
                         <p className="text-xs text-[#94A3B8] truncate">
                           {downloadProgress?.label || statusDetail}
@@ -223,7 +230,7 @@ export function NexusOneShell({
                           Boot Fault
                         </p>
                         <p className="text-xs leading-relaxed text-[#CBD5E1]">
-                          {errorMessage || 'Unable to start Android 2.2 virtual machine.'}
+                          {errorMessage || 'Unable to start Android virtual machine.'}
                         </p>
                       </div>
                       <button
@@ -235,13 +242,43 @@ export function NexusOneShell({
                       </button>
                     </div>
                   ) : (
-                    <div className="w-full max-w-[260px] space-y-5">
+                    <div className="w-full max-w-[268px] space-y-4">
+                      {/* Direct OS selector right on the device screen */}
+                      <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#14181F] border border-white/10">
+                        <button
+                          type="button"
+                          onClick={() => onSelectSourceType('builtin_generic')}
+                          className={`py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                            sourceType === 'builtin_generic' || sourceType === 'builtin_eeepc'
+                              ? 'bg-[#252D39] text-[#A4C639]'
+                              : 'text-[#94A3B8] hover:text-white'
+                          }`}
+                        >
+                          Android 2.2
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSelectSourceType('builtin_android9')}
+                          className={`py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                            sourceType === 'builtin_android9'
+                              ? 'bg-[#252D39] text-[#A4C639]'
+                              : 'text-[#94A3B8] hover:text-white'
+                          }`}
+                        >
+                          Android 9
+                        </button>
+                      </div>
+
                       <div className="space-y-1.5">
                         <p className="font-display text-lg font-semibold tracking-tight text-[#F1F5F9]">
-                          Android 2.2 Froyo
+                          {sourceType === 'builtin_android9'
+                            ? 'Android 9 Pie'
+                            : 'Android 2.2 Froyo'}
                         </p>
                         <p className="text-xs leading-relaxed text-[#94A3B8]">
-                          Genuine x86 Android 2.2 OS running inside WebAssembly hardware emulation.
+                          {sourceType === 'builtin_android9'
+                            ? 'Genuine 32-bit Android 9.0-r2 x86 Live CD inside WebAssembly hardware emulation.'
+                            : 'Genuine x86 Android 2.2 OS running inside WebAssembly hardware emulation.'}
                         </p>
                       </div>
                       <button
@@ -250,10 +287,14 @@ export function NexusOneShell({
                         className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-[#A4C639] hover:bg-[#B2D546] text-[#0D1014] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                       >
                         <Power className="w-3.5 h-3.5" />
-                        Boot Android 2.2
+                        {sourceType === 'builtin_android9'
+                          ? 'Boot Android 9'
+                          : 'Boot Android 2.2'}
                       </button>
                       <p className="text-[11px] text-[#64748B]">
-                        First boot caches the 82.4 MB ISO locally
+                        {sourceType === 'builtin_android9'
+                          ? 'First boot caches the 726 MB Android 9 ISO locally'
+                          : 'First boot caches the 82.4 MB Android 2.2 ISO locally'}
                       </p>
                     </div>
                   )}
@@ -370,11 +411,14 @@ export function NexusOneShell({
       <div className="mt-3 flex items-center gap-2 text-xs text-[#94A3B8]">
         <MousePointerClick className="w-3.5 h-3.5 text-[#A4C639]" />
         {pointerLocked ? (
-          <span>Pointer captured inside Android 2.2 · Press Esc to release</span>
+          <span>Pointer captured inside Android · Press Esc to release</span>
         ) : isVmActive ? (
           <span>Click inside display to steer Android cursor · Hardware keys active</span>
         ) : (
-          <span>Nexus One Chassis · 2010 HTC Passion · Android-x86 2.2</span>
+          <span>
+            Nexus One Chassis · 2010 HTC Passion ·{' '}
+            {sourceType === 'builtin_android9' ? 'Android-x86 9.0' : 'Android-x86 2.2'}
+          </span>
         )}
       </div>
     </div>

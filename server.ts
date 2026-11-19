@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
-type IsoVariantKey = 'generic' | 'eeepc';
+type IsoVariantKey = 'generic' | 'eeepc' | 'android9';
 
 interface IsoCatalogEntry {
   key: IsoVariantKey;
@@ -25,7 +25,7 @@ interface DownloadProgressState {
 const ISO_CATALOG: Record<IsoVariantKey, IsoCatalogEntry> = {
   generic: {
     key: 'generic',
-    label: 'Android-x86 2.2 Froyo (Generic PC / VESA)',
+    label: 'Android 2.2 Froyo (Generic PC / VESA)',
     filename: 'android-x86-2.2-generic.iso',
     downloadUrl:
       'https://sourceforge.net/projects/android-x86/files/Release%202.2/android-x86-2.2-generic.iso/download',
@@ -34,12 +34,21 @@ const ISO_CATALOG: Record<IsoVariantKey, IsoCatalogEntry> = {
   },
   eeepc: {
     key: 'eeepc',
-    label: 'Android-x86 2.2 Froyo (Eee PC Build)',
+    label: 'Android 2.2 Froyo (Eee PC Build)',
     filename: 'android-x86-2.2-eeepc.iso',
     downloadUrl:
       'https://sourceforge.net/projects/android-x86/files/Release%202.2/android-x86-2.2-eeepc.iso/download',
     expectedBytes: 76814336,
     description: 'Compact 2010 Android-x86 2.2 Froyo build originally tuned for netbook hardware.',
+  },
+  android9: {
+    key: 'android9',
+    label: 'Android 9 Pie (Android-x86 9.0-r2)',
+    filename: 'android-x86-9.0-r2.iso',
+    downloadUrl:
+      'https://sourceforge.net/projects/android-x86/files/Release%209.0/android-x86-9.0-r2.iso/download',
+    expectedBytes: 761266176,
+    description: 'Genuine 32-bit Android 9.0 Pie Live CD streamed over byte-range requests for v86 x86 emulation.',
   },
 };
 
@@ -49,12 +58,13 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 const downloadStates: Record<IsoVariantKey, DownloadProgressState> = {
   generic: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.generic.expectedBytes, error: null },
   eeepc: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.eeepc.expectedBytes, error: null },
+  android9: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.android9.expectedBytes, error: null },
 };
 
 const activeDownloads = new Map<IsoVariantKey, Promise<void>>();
 
 function isValidVariant(value: string): value is IsoVariantKey {
-  return value === 'generic' || value === 'eeepc';
+  return value === 'generic' || value === 'eeepc' || value === 'android9';
 }
 
 function getIsoPath(variant: IsoVariantKey): string {
@@ -193,7 +203,11 @@ async function startServer() {
     }
 
     res.json({
-      variants: [getVariantStatus('generic'), getVariantStatus('eeepc')],
+      variants: [
+        getVariantStatus('generic'),
+        getVariantStatus('eeepc'),
+        getVariantStatus('android9'),
+      ],
     });
   });
 

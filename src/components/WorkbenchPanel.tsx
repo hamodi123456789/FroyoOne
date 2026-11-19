@@ -339,57 +339,116 @@ export function WorkbenchPanel({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  disabled={!isVmActive}
-                  onClick={() =>
-                    onKeySequence(['trackball_down', 'trackball_down', 'enter'])
-                  }
-                  className="px-3.5 py-2 rounded-lg bg-[#A4C639]/15 hover:bg-[#A4C639]/25 border border-[#A4C639]/30 text-xs font-medium text-[#A4C639] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  Select VESA Mode (ISOLINUX)
-                </button>
-                <button
-                  type="button"
-                  disabled={!isVmActive}
-                  onClick={() =>
-                    onKeySequence([
-                      'trackball_down',
-                      'trackball_down',
-                      'trackball_down',
-                      'enter',
-                    ])
-                  }
-                  className="px-3.5 py-2 rounded-lg bg-[#1C222B] hover:bg-[#252D39] border border-white/8 text-xs font-medium text-[#CBD5E1] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  Select Debug Mode (ISOLINUX)
-                </button>
+                {config.sourceType === 'builtin_android9' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={!isVmActive}
+                      onClick={() =>
+                        onKeySequence([
+                          'trackball_down',
+                          'trackball_down',
+                          'trackball_down',
+                          'enter',
+                          'trackball_down',
+                          'trackball_down',
+                          'enter',
+                        ])
+                      }
+                      className="px-3.5 py-2 rounded-lg bg-[#A4C639]/15 hover:bg-[#A4C639]/25 border border-[#A4C639]/30 text-xs font-medium text-[#A4C639] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Boot Software Graphics (No HW Accel)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isVmActive}
+                      onClick={() => onHardwareKey('enter')}
+                      className="px-3.5 py-2 rounded-lg bg-[#1C222B] hover:bg-[#252D39] border border-white/8 text-xs font-medium text-[#CBD5E1] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Boot Default Live CD
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={!isVmActive}
+                      onClick={() =>
+                        onKeySequence(['trackball_down', 'trackball_down', 'enter'])
+                      }
+                      className="px-3.5 py-2 rounded-lg bg-[#A4C639]/15 hover:bg-[#A4C639]/25 border border-[#A4C639]/30 text-xs font-medium text-[#A4C639] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Select VESA Mode (ISOLINUX)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isVmActive}
+                      onClick={() =>
+                        onKeySequence([
+                          'trackball_down',
+                          'trackball_down',
+                          'trackball_down',
+                          'enter',
+                        ])
+                      }
+                      className="px-3.5 py-2 rounded-lg bg-[#1C222B] hover:bg-[#252D39] border border-white/8 text-xs font-medium text-[#CBD5E1] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Select Debug Mode (ISOLINUX)
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="border-t border-white/8 pt-5 space-y-2.5">
               <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
-                Android 2.2 (Froyo) Boot & Input Guide
+                {config.sourceType === 'builtin_android9'
+                  ? 'Android 9 (Pie) Boot & Input Guide'
+                  : 'Android 2.2 (Froyo) Boot & Input Guide'}
               </h2>
-              <div className="space-y-2 text-xs leading-relaxed text-[#94A3B8]">
-                <p>
-                  1. At the <span className="text-[#E2E8F0]">ISOLINUX</span> menu, click{' '}
-                  <span className="text-[#A4C639]">Select VESA Mode (ISOLINUX)</span> (or press Down
-                  twice + Enter) to boot <span className="text-[#E2E8F0]">Live CD - VESA mode</span>{' '}
-                  at 800×600 graphics.
-                </p>
-                <p>
-                  2. Initial x86 Dalvik & Zygote startup takes roughly 30–60 seconds in WebAssembly.
-                  Once booted, save a <span className="text-[#E2E8F0]">Snapshot</span> to resume
-                  instantly in future sessions.
-                </p>
-                <p>
-                  3. Click inside the Nexus One display to steer the Android cursor and drag the
-                  Froyo lockscreen tab right to unlock. Use the capacitive chin keys or your physical{' '}
-                  <span className="font-mono text-[#E2E8F0]">Esc</span> (Back) and{' '}
-                  <span className="font-mono text-[#E2E8F0]">Home</span> keys.
-                </p>
-              </div>
+              {config.sourceType === 'builtin_android9' ? (
+                <div className="space-y-2 text-xs leading-relaxed text-[#94A3B8]">
+                  <p>
+                    1. At the Android-x86 9.0 boot menu, click{' '}
+                    <span className="text-[#A4C639]">Boot Software Graphics (No HW Accel)</span> to
+                    enter <span className="text-[#E2E8F0]">Advanced options → No Hardware Acceleration</span>{' '}
+                    (<span className="font-mono text-[#E2E8F0]">nomodeset HWACCEL=0</span>) for
+                    reliable SwiftShader rendering in WebAssembly.
+                  </p>
+                  <p>
+                    2. Android 9 streams blocks over HTTP byte-ranges and takes ~1–2 minutes to
+                    initialize ART/Zygote on first boot. Capture a{' '}
+                    <span className="text-[#E2E8F0]">Snapshot</span> once booted to resume
+                    immediately next time.
+                  </p>
+                  <p>
+                    3. Click inside the Nexus One display to steer the Android pointer, or use{' '}
+                    <span className="font-mono text-[#E2E8F0]">Esc</span> (Back) and{' '}
+                    <span className="font-mono text-[#E2E8F0]">Home</span>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 text-xs leading-relaxed text-[#94A3B8]">
+                  <p>
+                    1. At the <span className="text-[#E2E8F0]">ISOLINUX</span> menu, click{' '}
+                    <span className="text-[#A4C639]">Select VESA Mode (ISOLINUX)</span> (or press
+                    Down twice + Enter) to boot{' '}
+                    <span className="text-[#E2E8F0]">Live CD - VESA mode</span> at 800×600 graphics.
+                  </p>
+                  <p>
+                    2. Initial x86 Dalvik & Zygote startup takes roughly 30–60 seconds in
+                    WebAssembly. Once booted, save a{' '}
+                    <span className="text-[#E2E8F0]">Snapshot</span> to resume instantly in future
+                    sessions.
+                  </p>
+                  <p>
+                    3. Click inside the Nexus One display to steer the Android cursor and drag the
+                    Froyo lockscreen tab right to unlock. Use the capacitive chin keys or your
+                    physical <span className="font-mono text-[#E2E8F0]">Esc</span> (Back) and{' '}
+                    <span className="font-mono text-[#E2E8F0]">Home</span> keys.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -625,20 +684,24 @@ export function WorkbenchPanel({
 
         {activeTab === 'images' && (
           <div className="space-y-6">
-            {/* Built-in Android-x86 2.2 Releases */}
+            {/* Built-in Android-x86 Releases */}
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
-                  Official Android-x86 2.2 (Froyo) Releases
+                  Official Android-x86 Releases
                 </h2>
                 <span className="text-xs text-[#94A3B8]">Auto-cached locally</span>
               </div>
 
               <div className="space-y-2.5">
-                {(['generic', 'eeepc'] as const).map((variant) => {
+                {(['generic', 'eeepc', 'android9'] as const).map((variant) => {
                   const info = isoCatalog?.[variant];
                   const sourceValue =
-                    variant === 'generic' ? 'builtin_generic' : 'builtin_eeepc';
+                    variant === 'android9'
+                      ? 'builtin_android9'
+                      : variant === 'eeepc'
+                      ? 'builtin_eeepc'
+                      : 'builtin_generic';
                   const isSelected = config.sourceType === sourceValue;
 
                   return (
@@ -656,7 +719,10 @@ export function WorkbenchPanel({
                       <div className="space-y-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-[#F1F5F9]">
-                            {info?.label || `Android-x86 2.2 (${variant})`}
+                            {info?.label ||
+                              (variant === 'android9'
+                                ? 'Android 9 Pie (Android-x86 9.0-r2)'
+                                : `Android 2.2 Froyo (${variant})`)}
                           </span>
                           {info?.available && (
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#A4C639] shrink-0" />
@@ -664,7 +730,7 @@ export function WorkbenchPanel({
                         </div>
                         <p className="text-xs text-[#94A3B8]">
                           {info?.description ||
-                            'Authentic 2010 Android-x86 2.2 Froyo Live CD ISO image.'}
+                            'Authentic Android-x86 Live CD ISO image.'}
                         </p>
                         <div className="text-[11px] font-mono tabular-nums text-[#64748B]">
                           {info ? formatBytes(info.sizeBytes) : '—'} ·{' '}
@@ -713,7 +779,7 @@ export function WorkbenchPanel({
             <div className="border-t border-white/8 pt-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
-                  Custom Android 2.2 ISO or Disk Image
+                  Custom Android ISO or Disk Image
                 </h2>
                 <span className="text-xs text-[#94A3B8]">Runs 100% locally in browser</span>
               </div>
@@ -797,8 +863,8 @@ export function WorkbenchPanel({
                 <label className="block text-xs font-medium text-[#CBD5E1]">
                   System Memory (RAM)
                 </label>
-                <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-[#0D1014] border border-white/8">
-                  {([256, 512] as const).map((mb) => (
+                <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-[#0D1014] border border-white/8">
+                  {([256, 512, 1024] as const).map((mb) => (
                     <button
                       key={mb}
                       type="button"

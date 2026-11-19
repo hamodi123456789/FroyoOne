@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { NexusOneShell } from './components/NexusOneShell';
 import { WorkbenchPanel } from './components/WorkbenchPanel';
 import { useAndroidEmulator } from './hooks/useAndroidEmulator';
-import type { WorkbenchTab } from './types/emulator';
+import type { IsoVariant, WorkbenchTab } from './types/emulator';
 
 const NAV_TABS: Array<{ id: WorkbenchTab; label: string }> = [
   { id: 'controls', label: 'Emulator' },
@@ -58,7 +58,7 @@ export default function App() {
     status === 'running' ||
     status === 'paused';
 
-  const handlePrecacheIso = async (variant: 'generic' | 'eeepc') => {
+  const handlePrecacheIso = async (variant: IsoVariant) => {
     const res = await fetch('/api/iso/prepare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -106,8 +106,29 @@ export default function App() {
             ))}
           </nav>
 
-          {/* Zone 3: Single Primary Action */}
-          <div className="flex items-center shrink-0">
+          {/* Zone 3: GitHub Repository Button & Primary Action */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <a
+              href="https://github.com/hamodi123456789/FroyoOne/tree/main"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open FroyoOne repository on GitHub"
+              title="View FroyoOne on GitHub"
+              className="w-9 h-9 rounded-lg bg-[#1C222B] hover:bg-[#252D39] border border-white/10 flex items-center justify-center text-[#CBD5E1] hover:text-white transition-colors shrink-0"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+                className="w-4 h-4"
+              >
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                />
+              </svg>
+            </a>
             {isActive ? (
               <button
                 type="button"
@@ -122,7 +143,9 @@ export default function App() {
                 onClick={() => void launchVm()}
                 className="px-4 py-2 rounded-lg bg-[#A4C639] hover:bg-[#B2D546] text-[#0D1014] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                Boot Android 2.2
+                {config.sourceType === 'builtin_android9'
+                  ? 'Boot Android 9'
+                  : 'Boot Android 2.2'}
               </button>
             )}
           </div>
@@ -156,10 +179,18 @@ export default function App() {
             status={status}
             statusDetail={statusDetail}
             errorMessage={errorMessage}
+            sourceType={config.sourceType}
             downloadProgress={downloadProgress}
             displayInfo={displayInfo}
             pointerLocked={pointerLocked}
             onBoot={() => void launchVm()}
+            onSelectSourceType={(sourceType) =>
+              setConfig((prev) => ({
+                ...prev,
+                sourceType,
+                vgaMemoryMb: sourceType === 'builtin_android9' ? 32 : prev.vgaMemoryMb,
+              }))
+            }
             onHardwareKey={sendHardwareKey}
             onLockPointer={lockPointer}
           />

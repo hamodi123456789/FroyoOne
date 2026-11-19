@@ -121,6 +121,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
       const map: Record<IsoVariant, IsoVariantStatus> = {
         generic: data.variants.find((v) => v.variant === 'generic')!,
         eeepc: data.variants.find((v) => v.variant === 'eeepc')!,
+        android9: data.variants.find((v) => v.variant === 'android9')!,
       };
       setIsoCatalog(map);
       return map;
@@ -240,7 +241,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         await new Promise((r) => window.setTimeout(r, 450));
         const poll = await fetch(`/api/iso/status?variant=${variant}`);
         if (!poll.ok) {
-          throw new Error('Lost connection while polling Android 2.2 image cache.');
+          throw new Error('Lost connection while polling Android image cache.');
         }
         current = (await poll.json()) as IsoVariantStatus;
         setDownloadProgress({
@@ -311,9 +312,15 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           }
         } else {
           const variant: IsoVariant =
-            effectiveConfig.sourceType === 'builtin_eeepc' ? 'eeepc' : 'generic';
+            effectiveConfig.sourceType === 'builtin_android9'
+              ? 'android9'
+              : effectiveConfig.sourceType === 'builtin_eeepc'
+              ? 'eeepc'
+              : 'generic';
+          const osDisplayName =
+            variant === 'android9' ? 'Android 9 (Pie)' : 'Android 2.2 (Froyo)';
           setStatus('preparing_image');
-          setStatusDetail(`Caching genuine Android-x86 2.2 (${variant}) ISO...`);
+          setStatusDetail(`Caching genuine ${osDisplayName} ISO...`);
           const cached = await prepareBuiltinIso(variant);
           cdromConfig = {
             url: `/api/iso/file/${variant}`,
@@ -322,6 +329,13 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           };
           bootOrder = 0x213;
         }
+
+        const activeOsLabel =
+          effectiveConfig.sourceType === 'builtin_android9'
+            ? 'Android 9 (Pie)'
+            : effectiveConfig.sourceType === 'custom_file'
+            ? effectiveConfig.customFile?.name || 'Custom Image'
+            : 'Android 2.2 (Froyo)';
 
         setDownloadProgress(null);
         setStatus('booting');
@@ -354,10 +368,10 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           setStatus('running');
           setStatusDetail(
             initialStateBuffer
-              ? 'Snapshot restored — Android 2.2 active'
-              : 'Booting Android 2.2 (Froyo) Live CD'
+              ? `Snapshot restored — ${activeOsLabel} active`
+              : `Booting ${activeOsLabel} Live CD`
           );
-          appendSerialLine('[FroyoOne] x86 WebAssembly VM initialized');
+          appendSerialLine(`[FroyoOne] x86 WebAssembly VM initialized (${activeOsLabel})`);
         });
 
         vm.add_listener('emulator-started', () => {
@@ -371,7 +385,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         vm.add_listener('screen-set-size', ([width, height, bpp]) => {
           setDisplayInfo({ width, height, bpp });
           if (bpp > 0) {
-            setStatusDetail(`Android 2.2 graphics active (${width}×${height} · ${bpp}-bit)`);
+            setStatusDetail(`${activeOsLabel} graphics active (${width}×${height} · ${bpp}-bit)`);
           }
         });
 
@@ -548,11 +562,13 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         if (wasRunning) await vm.run();
 
         const thumbnailDataUrl = captureScreenshot();
+        const labelPrefix =
+          config.sourceType === 'builtin_android9' ? 'Android 9' : 'Android 2.2';
         const record: VmSnapshotRecord = {
           id: `snap_${Date.now()}`,
           name:
             customName?.trim() ||
-            `Android 2.2 · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+            `${labelPrefix} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
           createdAt: Date.now(),
           isoVariant: config.sourceType,
           memoryMb: config.memoryMb,
@@ -585,15 +601,19 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           setStatusDetail(`Restored "${record.name}"`);
         } else {
           const targetSource =
-            record.isoVariant === 'builtin_eeepc'
+            record.isoVariant === 'builtin_android9'
+              ? 'builtin_android9'
+              : record.isoVariant === 'builtin_eeepc'
               ? 'builtin_eeepc'
               : record.isoVariant === 'custom_file'
               ? 'custom_file'
               : 'builtin_generic';
+          const restoredMem: 256 | 512 | 1024 =
+            record.memoryMb === 256 ? 256 : record.memoryMb === 1024 ? 1024 : 512;
           await launchVm(
             {
               sourceType: targetSource,
-              memoryMb: record.memoryMb === 256 ? 256 : 512,
+              memoryMb: restoredMem,
             },
             record.stateBuffer
           );
