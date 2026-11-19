@@ -1,0 +1,6 @@
+{
+  "name": "FroyoOne",
+  "description": "Authentic Android 2.2 (Froyo) x86 emulator running in WebAssembly inside a 2010 Nexus One hardware shell with live serial console and state snapshots.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
