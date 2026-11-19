@@ -1,3 +1,10 @@
+# Use it 📱
+Use the app now: https://froyoone.ai.studio
+
+# How to set the VM up 🎉
+
+---
+
 Step 1: boot up your phone
 
 Step 2: you should see this menu
@@ -15,6 +22,8 @@ It may take a lot of time to finish loading. But once we see the bootup screen, 
 Click inside the Nexus One display to steer the Android cursor and drag the Froyo lockscreen tab right to unlock. Use the capacitive chin keys or your physical Esc (Back) and Home keys.
 
 Congratulations, you have successfully set up your android 2.2 VM 🚀🎉
+
+---
 
 # Pull Request Rules
 
