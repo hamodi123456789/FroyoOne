@@ -5,9 +5,9 @@ Use the app now: https://froyoone.ai.studio
 
 ---
 
-Step 1: boot up your phone
+Step 1: Boot up your phone.
 
-Step 2: you should see this menu
+Step 2: You should see this menu.
 
 <img width="695" height="424" alt="IMG_7026" src="https://github.com/user-attachments/assets/e97fbb42-e27b-49bd-8cb9-b9a155548bb0" />
 
