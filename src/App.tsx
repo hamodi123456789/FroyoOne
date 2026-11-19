@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { NexusOneShell } from './components/NexusOneShell';
+import { SUPPORT_MODAL_STORAGE_KEY, SupportModal } from './components/SupportModal';
+import { TvMonitorShell } from './components/TvMonitorShell';
 import { WorkbenchPanel } from './components/WorkbenchPanel';
 import { useAndroidEmulator } from './hooks/useAndroidEmulator';
 import type { IsoVariant, WorkbenchTab } from './types/emulator';
@@ -14,6 +16,24 @@ const NAV_TABS: Array<{ id: WorkbenchTab; label: string }> = [
 export default function App() {
   const screenRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('controls');
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(SUPPORT_MODAL_STORAGE_KEY) !== 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const handleCloseSupportModal = (dontAskAgain: boolean) => {
+    if (dontAskAgain) {
+      try {
+        window.localStorage.setItem(SUPPORT_MODAL_STORAGE_KEY, 'true');
+      } catch {
+        // Ignore storage errors in restricted contexts
+      }
+    }
+    setIsSupportModalOpen(false);
+  };
 
   const {
     status,
@@ -34,6 +54,7 @@ export default function App() {
     snapshotBusy,
     launchVm,
     powerOff,
+    switchDeviceMode,
     togglePause,
     restartVm,
     sendHardwareKey,
@@ -64,10 +85,16 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ variant }),
     });
+    if (!res.ok) {
+      throw new Error(`Failed to prepare ISO (HTTP ${res.status})`);
+    }
     let current = await res.json();
     while (!current.available && !current.error) {
       await new Promise((r) => window.setTimeout(r, 500));
       const poll = await fetch(`/api/iso/status?variant=${variant}`);
+      if (!poll.ok) {
+        throw new Error(`Failed to check ISO status (HTTP ${poll.status})`);
+      }
       current = await poll.json();
       await fetchIsoCatalog();
     }
@@ -143,7 +170,9 @@ export default function App() {
                 onClick={() => void launchVm()}
                 className="px-4 py-2 rounded-lg bg-[#A4C639] hover:bg-[#B2D546] text-[#0D1014] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                {config.sourceType === 'builtin_android9'
+                {config.deviceMode === 'tv'
+                  ? 'Boot Android TV'
+                  : config.sourceType === 'builtin_android9'
                   ? 'Boot Android 9'
                   : 'Boot Android 2.2'}
               </button>
@@ -171,33 +200,77 @@ export default function App() {
       </header>
 
       {/* Main Two-Zone Emulator Studio */}
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-        {/* Left Stage (~5 cols): 2010 Nexus One Hardware Shell + Live Android 2.2 Screen */}
-        <div className="lg:col-span-5 flex justify-center">
-          <NexusOneShell
-            screenRef={screenRef}
-            status={status}
-            statusDetail={statusDetail}
-            errorMessage={errorMessage}
-            sourceType={config.sourceType}
-            downloadProgress={downloadProgress}
-            displayInfo={displayInfo}
-            pointerLocked={pointerLocked}
-            onBoot={() => void launchVm()}
-            onSelectSourceType={(sourceType) =>
-              setConfig((prev) => ({
-                ...prev,
-                sourceType,
-                vgaMemoryMb: sourceType === 'builtin_android9' ? 32 : prev.vgaMemoryMb,
-              }))
-            }
-            onHardwareKey={sendHardwareKey}
-            onLockPointer={lockPointer}
-          />
+      <main
+        className={`flex-1 w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center ${
+          config.deviceMode === 'tv' ? 'max-w-[1440px]' : 'max-w-[1360px]'
+        }`}
+      >
+        {/* Left Stage: Phone Chassis (5 cols) or 16:9 Android TV Monitor (7 cols) */}
+        <div
+          className={`${
+            config.deviceMode === 'tv' ? 'lg:col-span-7' : 'lg:col-span-5'
+          } flex justify-center`}
+        >
+          {config.deviceMode === 'tv' ? (
+            <TvMonitorShell
+              screenRef={screenRef}
+              status={status}
+              statusDetail={statusDetail}
+              errorMessage={errorMessage}
+              sourceType={config.sourceType}
+              customFile={config.customFile}
+              downloadProgress={downloadProgress}
+              displayInfo={displayInfo}
+              pointerLocked={pointerLocked}
+              onBoot={() => void launchVm()}
+              onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
+              onSelectSourceType={(sourceType) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  sourceType,
+                  vgaMemoryMb: 32,
+                }))
+              }
+              onSelectCustomFile={(file) => {
+                if (!file) return;
+                const isDiskImg = /\.(img|raw|qcow2|vhd)$/i.test(file.name);
+                setConfig((prev) => ({
+                  ...prev,
+                  sourceType: 'custom_file',
+                  customFile: file,
+                  customMediaKind: isDiskImg ? 'hda' : 'cdrom',
+                }));
+              }}
+              onHardwareKey={sendHardwareKey}
+              onLockPointer={lockPointer}
+            />
+          ) : (
+            <NexusOneShell
+              screenRef={screenRef}
+              status={status}
+              statusDetail={statusDetail}
+              errorMessage={errorMessage}
+              sourceType={config.sourceType}
+              downloadProgress={downloadProgress}
+              displayInfo={displayInfo}
+              pointerLocked={pointerLocked}
+              onBoot={() => void launchVm()}
+              onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
+              onSelectSourceType={(sourceType) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  sourceType,
+                  vgaMemoryMb: sourceType === 'builtin_android9' ? 32 : prev.vgaMemoryMb,
+                }))
+              }
+              onHardwareKey={sendHardwareKey}
+              onLockPointer={lockPointer}
+            />
+          )}
         </div>
 
-        {/* Right Deck (~7 cols): Workbench Controls, Snapshots, Serial Console, Image Manager */}
-        <div className="lg:col-span-7">
+        {/* Right Deck: Workbench Controls, Snapshots, Serial Console, Image Manager */}
+        <div className={config.deviceMode === 'tv' ? 'lg:col-span-5' : 'lg:col-span-7'}>
           <WorkbenchPanel
             activeTab={activeTab}
             status={status}
@@ -215,6 +288,7 @@ export default function App() {
             snapshots={snapshots}
             snapshotBusy={snapshotBusy}
             onBoot={(override) => void launchVm(override)}
+            onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
             onTogglePause={() => void togglePause()}
             onRestart={restartVm}
             onHardwareKey={sendHardwareKey}
@@ -234,6 +308,11 @@ export default function App() {
           />
         </div>
       </main>
+
+      <SupportModal
+        isOpen={isSupportModalOpen}
+        onClose={handleCloseSupportModal}
+      />
     </div>
   );
 }

@@ -6,18 +6,21 @@ import {
   FileArchive,
   HardDrive,
   Keyboard,
+  Monitor,
   Mouse,
   Pause,
   Play,
   RotateCcw,
   Save,
   Send,
+  Smartphone,
   Terminal,
   Trash2,
   Upload,
 } from 'lucide-react';
 import type {
   AndroidHardwareKey,
+  DeviceMode,
   EmulatorConfig,
   EmulatorDisplayInfo,
   EmulatorStatus,
@@ -45,6 +48,7 @@ interface WorkbenchPanelProps {
   snapshots: VmSnapshotMeta[];
   snapshotBusy: boolean;
   onBoot: (override?: Partial<EmulatorConfig>) => void;
+  onSelectDeviceMode: (mode: DeviceMode) => void;
   onTogglePause: () => void;
   onRestart: () => void;
   onHardwareKey: (key: AndroidHardwareKey) => void;
@@ -97,6 +101,7 @@ export function WorkbenchPanel({
   snapshots,
   snapshotBusy,
   onBoot,
+  onSelectDeviceMode,
   onTogglePause,
   onRestart,
   onHardwareKey,
@@ -154,6 +159,8 @@ export function WorkbenchPanel({
     setPrecachingVariant(variant);
     try {
       await onPrecacheIso(variant);
+    } catch {
+      // Error state is reflected in /api/iso/status
     } finally {
       setPrecachingVariant(null);
     }
@@ -339,21 +346,34 @@ export function WorkbenchPanel({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                {config.sourceType === 'builtin_android9' ? (
+                {config.sourceType === 'builtin_android7' ||
+                config.sourceType === 'builtin_android8' ||
+                config.sourceType === 'builtin_android9' ? (
                   <>
                     <button
                       type="button"
                       disabled={!isVmActive}
                       onClick={() =>
-                        onKeySequence([
-                          'trackball_down',
-                          'trackball_down',
-                          'trackball_down',
-                          'enter',
-                          'trackball_down',
-                          'trackball_down',
-                          'enter',
-                        ])
+                        onKeySequence(
+                          config.sourceType === 'builtin_android7'
+                            ? [
+                                'trackball_down',
+                                'trackball_down',
+                                'trackball_down',
+                                'enter',
+                                'trackball_down',
+                                'enter',
+                              ]
+                            : [
+                                'trackball_down',
+                                'trackball_down',
+                                'trackball_down',
+                                'enter',
+                                'trackball_down',
+                                'trackball_down',
+                                'enter',
+                              ]
+                        )
                       }
                       className="px-3.5 py-2 rounded-lg bg-[#A4C639]/15 hover:bg-[#A4C639]/25 border border-[#A4C639]/30 text-xs font-medium text-[#A4C639] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                     >
@@ -402,29 +422,36 @@ export function WorkbenchPanel({
 
             <div className="border-t border-white/8 pt-5 space-y-2.5">
               <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
-                {config.sourceType === 'builtin_android9'
+                {config.sourceType === 'builtin_android7'
+                  ? 'Android 7.1 (Nougat) Boot & Input Guide'
+                  : config.sourceType === 'builtin_android8'
+                  ? 'Android 8.1 (Oreo) Boot & Input Guide'
+                  : config.sourceType === 'builtin_android9'
                   ? 'Android 9 (Pie) Boot & Input Guide'
                   : 'Android 2.2 (Froyo) Boot & Input Guide'}
               </h2>
-              {config.sourceType === 'builtin_android9' ? (
+              {config.sourceType === 'builtin_android7' ||
+              config.sourceType === 'builtin_android8' ||
+              config.sourceType === 'builtin_android9' ? (
                 <div className="space-y-2 text-xs leading-relaxed text-[#94A3B8]">
                   <p>
-                    1. At the Android-x86 9.0 boot menu, click{' '}
+                    1. At the Android-x86 GRUB boot menu, click{' '}
                     <span className="text-[#A4C639]">Boot Software Graphics (No HW Accel)</span> to
                     enter <span className="text-[#E2E8F0]">Advanced options → No Hardware Acceleration</span>{' '}
                     (<span className="font-mono text-[#E2E8F0]">nomodeset HWACCEL=0</span>) for
                     reliable SwiftShader rendering in WebAssembly.
                   </p>
                   <p>
-                    2. Android 9 streams blocks over HTTP byte-ranges and takes ~1–2 minutes to
-                    initialize ART/Zygote on first boot. Capture a{' '}
+                    2. Modern Android-x86 images stream blocks over HTTP byte-ranges and take ~1–2
+                    minutes to initialize ART/Zygote on first boot. Capture a{' '}
                     <span className="text-[#E2E8F0]">Snapshot</span> once booted to resume
                     immediately next time.
                   </p>
                   <p>
-                    3. Click inside the Nexus One display to steer the Android pointer, or use{' '}
-                    <span className="font-mono text-[#E2E8F0]">Esc</span> (Back) and{' '}
-                    <span className="font-mono text-[#E2E8F0]">Home</span>.
+                    3.{' '}
+                    {config.deviceMode === 'tv'
+                      ? 'Use the TV D-Pad remote keys below the monitor or click inside the 16:9 display to steer the pointer.'
+                      : 'Click inside the Nexus One display to steer the Android pointer, or use Esc (Back) and Home.'}
                   </p>
                 </div>
               ) : (
@@ -684,8 +711,44 @@ export function WorkbenchPanel({
 
         {activeTab === 'images' && (
           <div className="space-y-6">
+            {/* Device Form Factor Switcher */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
+                  Device Layout
+                </h2>
+                <span className="text-xs text-[#94A3B8]">Phone chassis or 16:9 TV monitor</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-[#0D1014] border border-white/8">
+                <button
+                  type="button"
+                  onClick={() => onSelectDeviceMode('phone')}
+                  className={`py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
+                    config.deviceMode === 'phone'
+                      ? 'bg-[#1C222B] text-[#A4C639] font-semibold'
+                      : 'text-[#94A3B8] hover:text-white'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  Phone (Nexus One)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectDeviceMode('tv')}
+                  className={`py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
+                    config.deviceMode === 'tv'
+                      ? 'bg-[#1C222B] text-[#A4C639] font-semibold'
+                      : 'text-[#94A3B8] hover:text-white'
+                  }`}
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                  Android TV Monitor
+                </button>
+              </div>
+            </div>
+
             {/* Built-in Android-x86 Releases */}
-            <div className="space-y-3">
+            <div className="border-t border-white/8 pt-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-display text-sm font-semibold text-[#F1F5F9]">
                   Official Android-x86 Releases
@@ -694,21 +757,32 @@ export function WorkbenchPanel({
               </div>
 
               <div className="space-y-2.5">
-                {(['generic', 'eeepc', 'android9'] as const).map((variant) => {
+                {(['generic', 'eeepc', 'android7', 'android8', 'android9'] as const).map((variant) => {
                   const info = isoCatalog?.[variant];
                   const sourceValue =
-                    variant === 'android9'
+                    variant === 'android7'
+                      ? 'builtin_android7'
+                      : variant === 'android8'
+                      ? 'builtin_android8'
+                      : variant === 'android9'
                       ? 'builtin_android9'
                       : variant === 'eeepc'
                       ? 'builtin_eeepc'
                       : 'builtin_generic';
                   const isSelected = config.sourceType === sourceValue;
+                  const requiresTv = variant === 'android7' || variant === 'android8';
 
                   return (
                     <div
                       key={variant}
                       onClick={() =>
-                        setConfig((prev) => ({ ...prev, sourceType: sourceValue }))
+                        setConfig((prev) => ({
+                          ...prev,
+                          sourceType: sourceValue,
+                          ...(requiresTv && !isVmActive
+                            ? { deviceMode: 'tv', vgaMemoryMb: 32 }
+                            : {}),
+                        }))
                       }
                       className={`p-3.5 rounded-lg border transition-colors cursor-pointer flex items-center justify-between gap-4 ${
                         isSelected
@@ -720,7 +794,11 @@ export function WorkbenchPanel({
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-[#F1F5F9]">
                             {info?.label ||
-                              (variant === 'android9'
+                              (variant === 'android7'
+                                ? 'Android 7.1 Nougat (Android-x86 7.1-r5)'
+                                : variant === 'android8'
+                                ? 'Android 8.1 Oreo (Android-x86 8.1-r6)'
+                                : variant === 'android9'
                                 ? 'Android 9 Pie (Android-x86 9.0-r2)'
                                 : `Android 2.2 Froyo (${variant})`)}
                           </span>
@@ -762,7 +840,15 @@ export function WorkbenchPanel({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onBoot({ sourceType: sourceValue });
+                            onBoot(
+                              requiresTv
+                                ? {
+                                    sourceType: sourceValue,
+                                    deviceMode: 'tv',
+                                    vgaMemoryMb: 32,
+                                  }
+                                : { sourceType: sourceValue }
+                            );
                           }}
                           className="px-3 py-1.5 rounded-md bg-[#A4C639] hover:bg-[#B2D546] text-[#0D1014] text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
                         >

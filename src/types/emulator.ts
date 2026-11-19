@@ -1,3 +1,5 @@
+export type DeviceMode = 'phone' | 'tv';
+
 export type EmulatorStatus =
   | 'idle'
   | 'preparing_image'
@@ -6,11 +8,13 @@ export type EmulatorStatus =
   | 'paused'
   | 'error';
 
-export type IsoVariant = 'generic' | 'eeepc' | 'android9';
+export type IsoVariant = 'generic' | 'eeepc' | 'android7' | 'android8' | 'android9';
 
 export type BootSourceType =
   | 'builtin_generic'
   | 'builtin_eeepc'
+  | 'builtin_android7'
+  | 'builtin_android8'
   | 'builtin_android9'
   | 'custom_file';
 
@@ -64,6 +68,7 @@ export interface VmSnapshotMeta {
   name: string;
   createdAt: number;
   isoVariant: string;
+  deviceMode?: DeviceMode;
   memoryMb: number;
   sizeBytes: number;
   thumbnailDataUrl: string | null;
@@ -74,6 +79,7 @@ export interface VmSnapshotRecord extends VmSnapshotMeta {
 }
 
 export interface EmulatorConfig {
+  deviceMode: DeviceMode;
   sourceType: BootSourceType;
   memoryMb: 256 | 512 | 1024;
   vgaMemoryMb: 16 | 32;

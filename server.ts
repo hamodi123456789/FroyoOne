@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
-type IsoVariantKey = 'generic' | 'eeepc' | 'android9';
+type IsoVariantKey = 'generic' | 'eeepc' | 'android7' | 'android8' | 'android9';
 
 interface IsoCatalogEntry {
   key: IsoVariantKey;
@@ -41,6 +41,24 @@ const ISO_CATALOG: Record<IsoVariantKey, IsoCatalogEntry> = {
     expectedBytes: 76814336,
     description: 'Compact 2010 Android-x86 2.2 Froyo build originally tuned for netbook hardware.',
   },
+  android7: {
+    key: 'android7',
+    label: 'Android 7.1 Nougat (Android-x86 7.1-r5)',
+    filename: 'android-x86-7.1-r5.iso',
+    downloadUrl:
+      'https://sourceforge.net/projects/android-x86/files/Release%207.1/android-x86-7.1-r5.iso/download',
+    expectedBytes: 769654784,
+    description: 'Genuine 32-bit Android 7.1.2 Nougat Live CD streamed over byte-range requests for v86.',
+  },
+  android8: {
+    key: 'android8',
+    label: 'Android 8.1 Oreo (Android-x86 8.1-r6)',
+    filename: 'android-x86-8.1-r6.iso',
+    downloadUrl:
+      'https://sourceforge.net/projects/android-x86/files/Release%208.1/android-x86-8.1-r6.iso/download',
+    expectedBytes: 689963008,
+    description: 'Genuine 32-bit Android 8.1 Oreo Live CD streamed over byte-range requests for v86.',
+  },
   android9: {
     key: 'android9',
     label: 'Android 9 Pie (Android-x86 9.0-r2)',
@@ -55,16 +73,35 @@ const ISO_CATALOG: Record<IsoVariantKey, IsoCatalogEntry> = {
 const CACHE_DIR = path.resolve(process.cwd(), '.cache', 'isos');
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
+// Remove any orphaned partial downloads left from a previous server restart
+try {
+  for (const entry of fs.readdirSync(CACHE_DIR)) {
+    if (entry.endsWith('.tmp')) {
+      fs.unlinkSync(path.join(CACHE_DIR, entry));
+    }
+  }
+} catch {
+  // ignore cleanup failure
+}
+
 const downloadStates: Record<IsoVariantKey, DownloadProgressState> = {
   generic: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.generic.expectedBytes, error: null },
   eeepc: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.eeepc.expectedBytes, error: null },
+  android7: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.android7.expectedBytes, error: null },
+  android8: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.android8.expectedBytes, error: null },
   android9: { downloading: false, bytesDownloaded: 0, totalBytes: ISO_CATALOG.android9.expectedBytes, error: null },
 };
 
 const activeDownloads = new Map<IsoVariantKey, Promise<void>>();
 
 function isValidVariant(value: string): value is IsoVariantKey {
-  return value === 'generic' || value === 'eeepc' || value === 'android9';
+  return (
+    value === 'generic' ||
+    value === 'eeepc' ||
+    value === 'android7' ||
+    value === 'android8' ||
+    value === 'android9'
+  );
 }
 
 function getIsoPath(variant: IsoVariantKey): string {
@@ -74,8 +111,14 @@ function getIsoPath(variant: IsoVariantKey): string {
 function getVariantStatus(variant: IsoVariantKey) {
   const entry = ISO_CATALOG[variant];
   const filePath = getIsoPath(variant);
-  const exists = fs.existsSync(filePath);
-  const stat = exists ? fs.statSync(filePath) : null;
+  let stat: fs.Stats | null = null;
+  try {
+    if (fs.existsSync(filePath)) {
+      stat = fs.statSync(filePath);
+    }
+  } catch {
+    stat = null;
+  }
   const state = downloadStates[variant];
 
   return {
@@ -206,6 +249,8 @@ async function startServer() {
       variants: [
         getVariantStatus('generic'),
         getVariantStatus('eeepc'),
+        getVariantStatus('android7'),
+        getVariantStatus('android8'),
         getVariantStatus('android9'),
       ],
     });
@@ -244,7 +289,11 @@ async function startServer() {
 
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.sendFile(filePath);
+    res.sendFile(filePath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).end();
+      }
+    });
   });
 
   if (process.env.NODE_ENV === 'production') {

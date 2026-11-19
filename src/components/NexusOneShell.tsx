@@ -3,15 +3,18 @@ import {
   ArrowLeft,
   Home,
   LayoutGrid,
+  Monitor,
   MousePointerClick,
   Power,
   Search,
+  Smartphone,
   Volume1,
   Volume2,
 } from 'lucide-react';
 import type {
   AndroidHardwareKey,
   BootSourceType,
+  DeviceMode,
   EmulatorDisplayInfo,
   EmulatorStatus,
 } from '../types/emulator';
@@ -27,6 +30,7 @@ interface NexusOneShellProps {
   displayInfo: EmulatorDisplayInfo;
   pointerLocked: boolean;
   onBoot: () => void;
+  onSelectDeviceMode: (mode: DeviceMode) => void;
   onSelectSourceType: (source: BootSourceType) => void;
   onHardwareKey: (key: AndroidHardwareKey) => void;
   onLockPointer: () => void;
@@ -46,6 +50,7 @@ export function NexusOneShell({
   displayInfo,
   pointerLocked,
   onBoot,
+  onSelectDeviceMode,
   onSelectSourceType,
   onHardwareKey,
   onLockPointer,
@@ -242,7 +247,27 @@ export function NexusOneShell({
                       </button>
                     </div>
                   ) : (
-                    <div className="w-full max-w-[268px] space-y-4">
+                    <div className="w-full max-w-[268px] space-y-3.5">
+                      {/* Form factor switcher: Phone | Android TV */}
+                      <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#14181F] border border-white/10">
+                        <button
+                          type="button"
+                          onClick={() => onSelectDeviceMode('phone')}
+                          className="py-1.5 rounded-md text-xs font-medium bg-[#252D39] text-[#A4C639] flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+                        >
+                          <Smartphone className="w-3.5 h-3.5" />
+                          Phone
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSelectDeviceMode('tv')}
+                          className="py-1.5 rounded-md text-xs font-medium text-[#94A3B8] hover:text-white flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+                        >
+                          <Monitor className="w-3.5 h-3.5" />
+                          Android TV
+                        </button>
+                      </div>
+
                       {/* Direct OS selector right on the device screen */}
                       <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#14181F] border border-white/10">
                         <button

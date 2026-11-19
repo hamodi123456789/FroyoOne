@@ -8,6 +8,8 @@ import {
 } from '../services/snapshotDb';
 import type {
   AndroidHardwareKey,
+  BootSourceType,
+  DeviceMode,
   EmulatorConfig,
   EmulatorDisplayInfo,
   EmulatorStatus,
@@ -85,6 +87,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
   const [statusDetail, setStatusDetail] = useState<string>('Ready to boot Android 2.2 (Froyo)');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [config, setConfig] = useState<EmulatorConfig>({
+    deviceMode: 'phone',
     sourceType: 'builtin_generic',
     memoryMb: 512,
     vgaMemoryMb: 16,
@@ -118,10 +121,21 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
       const res = await fetch('/api/iso/status');
       if (!res.ok) return null;
       const data = (await res.json()) as { variants: IsoVariantStatus[] };
+      const byVariant = new Map(data.variants.map((v) => [v.variant, v]));
+      const generic = byVariant.get('generic');
+      const eeepc = byVariant.get('eeepc');
+      const android7 = byVariant.get('android7');
+      const android8 = byVariant.get('android8');
+      const android9 = byVariant.get('android9');
+      if (!generic || !eeepc || !android7 || !android8 || !android9) {
+        return null;
+      }
       const map: Record<IsoVariant, IsoVariantStatus> = {
-        generic: data.variants.find((v) => v.variant === 'generic')!,
-        eeepc: data.variants.find((v) => v.variant === 'eeepc')!,
-        android9: data.variants.find((v) => v.variant === 'android9')!,
+        generic,
+        eeepc,
+        android7,
+        android8,
+        android9,
       };
       setIsoCatalog(map);
       return map;
@@ -263,8 +277,19 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         ...config,
         ...overrideConfig,
       };
+      const modeChanged = effectiveConfig.deviceMode !== config.deviceMode;
       if (overrideConfig) {
         setConfig(effectiveConfig);
+      }
+
+      setErrorMessage(null);
+      await destroyVm();
+
+      if (modeChanged) {
+        // Wait for React to swap NexusOneShell <-> TvMonitorShell so screenRef.current points to the active shell container
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+        });
       }
 
       if (!screenRef.current) {
@@ -272,9 +297,6 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         setErrorMessage('Emulator display mount is unavailable.');
         return;
       }
-
-      setErrorMessage(null);
-      await destroyVm();
 
       // Ensure clean screen_container DOM structure for v86
       const host = screenRef.current;
@@ -296,6 +318,21 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         let hdaConfig: V86Options['hda'];
         let bootOrder = 0x213; // CD-ROM -> Floppy -> Hard disk
 
+        const getOsLabel = (src: BootSourceType): string => {
+          switch (src) {
+            case 'builtin_android7':
+              return 'Android 7.1 (Nougat)';
+            case 'builtin_android8':
+              return 'Android 8.1 (Oreo)';
+            case 'builtin_android9':
+              return 'Android 9 (Pie)';
+            case 'custom_file':
+              return effectiveConfig.customFile?.name || 'Custom Image';
+            default:
+              return 'Android 2.2 (Froyo)';
+          }
+        };
+
         if (effectiveConfig.sourceType === 'custom_file') {
           if (!effectiveConfig.customFile) {
             throw new Error('Select a local .iso or .img file before booting.');
@@ -312,13 +349,16 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           }
         } else {
           const variant: IsoVariant =
-            effectiveConfig.sourceType === 'builtin_android9'
+            effectiveConfig.sourceType === 'builtin_android7'
+              ? 'android7'
+              : effectiveConfig.sourceType === 'builtin_android8'
+              ? 'android8'
+              : effectiveConfig.sourceType === 'builtin_android9'
               ? 'android9'
               : effectiveConfig.sourceType === 'builtin_eeepc'
               ? 'eeepc'
               : 'generic';
-          const osDisplayName =
-            variant === 'android9' ? 'Android 9 (Pie)' : 'Android 2.2 (Froyo)';
+          const osDisplayName = getOsLabel(effectiveConfig.sourceType);
           setStatus('preparing_image');
           setStatusDetail(`Caching genuine ${osDisplayName} ISO...`);
           const cached = await prepareBuiltinIso(variant);
@@ -330,12 +370,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           bootOrder = 0x213;
         }
 
-        const activeOsLabel =
-          effectiveConfig.sourceType === 'builtin_android9'
-            ? 'Android 9 (Pie)'
-            : effectiveConfig.sourceType === 'custom_file'
-            ? effectiveConfig.customFile?.name || 'Custom Image'
-            : 'Android 2.2 (Froyo)';
+        const activeOsLabel = getOsLabel(effectiveConfig.sourceType);
 
         setDownloadProgress(null);
         setStatus('booting');
@@ -441,6 +476,50 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
     setStatus('idle');
     setStatusDetail('Emulator powered off');
   }, [destroyVm, screenRef]);
+
+  const switchDeviceMode = useCallback(
+    async (mode: DeviceMode) => {
+      if (mode === config.deviceMode) return;
+      if (
+        status === 'preparing_image' ||
+        status === 'booting' ||
+        status === 'running' ||
+        status === 'paused'
+      ) {
+        await powerOff();
+      }
+      setErrorMessage(null);
+      setConfig((prev) => {
+        if (mode === 'tv') {
+          const nextSource: BootSourceType =
+            prev.sourceType === 'builtin_generic' || prev.sourceType === 'builtin_eeepc'
+              ? 'builtin_android9'
+              : prev.sourceType;
+          return {
+            ...prev,
+            deviceMode: 'tv',
+            sourceType: nextSource,
+            vgaMemoryMb: 32,
+          };
+        }
+        const nextSource: BootSourceType =
+          prev.sourceType === 'builtin_android7' || prev.sourceType === 'builtin_android8'
+            ? 'builtin_generic'
+            : prev.sourceType;
+        return {
+          ...prev,
+          deviceMode: 'phone',
+          sourceType: nextSource,
+        };
+      });
+      setStatusDetail(
+        mode === 'tv'
+          ? 'Ready to boot Android TV on 16:9 monitor'
+          : 'Ready to boot Android on Nexus One'
+      );
+    },
+    [config.deviceMode, powerOff, status]
+  );
 
   const togglePause = useCallback(async () => {
     const vm = emulatorRef.current;
@@ -563,7 +642,13 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
 
         const thumbnailDataUrl = captureScreenshot();
         const labelPrefix =
-          config.sourceType === 'builtin_android9' ? 'Android 9' : 'Android 2.2';
+          config.sourceType === 'builtin_android7'
+            ? 'Android 7.1'
+            : config.sourceType === 'builtin_android8'
+            ? 'Android 8.1'
+            : config.sourceType === 'builtin_android9'
+            ? 'Android 9'
+            : 'Android 2.2';
         const record: VmSnapshotRecord = {
           id: `snap_${Date.now()}`,
           name:
@@ -571,6 +656,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
             `${labelPrefix} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
           createdAt: Date.now(),
           isoVariant: config.sourceType,
+          deviceMode: config.deviceMode,
           memoryMb: config.memoryMb,
           sizeBytes: stateBuffer.byteLength,
           thumbnailDataUrl,
@@ -582,7 +668,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         setSnapshotBusy(false);
       }
     },
-    [captureScreenshot, config.memoryMb, config.sourceType, refreshSnapshots]
+    [captureScreenshot, config.deviceMode, config.memoryMb, config.sourceType, refreshSnapshots]
   );
 
   const restoreSnapshotById = useCallback(
@@ -592,7 +678,13 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         const record = await getSnapshot(id);
         if (!record) return;
         const vm = emulatorRef.current;
-        if (vm && record.isoVariant === config.sourceType && record.memoryMb === config.memoryMb) {
+        const sameMode = !record.deviceMode || record.deviceMode === config.deviceMode;
+        if (
+          vm &&
+          record.isoVariant === config.sourceType &&
+          record.memoryMb === config.memoryMb &&
+          sameMode
+        ) {
           const wasRunning = vm.is_running();
           if (wasRunning) await vm.stop();
           await vm.restore_state(record.stateBuffer);
@@ -600,18 +692,28 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
           setStatus('running');
           setStatusDetail(`Restored "${record.name}"`);
         } else {
-          const targetSource =
-            record.isoVariant === 'builtin_android9'
+          const targetSource: BootSourceType =
+            record.isoVariant === 'builtin_android7'
+              ? 'builtin_android7'
+              : record.isoVariant === 'builtin_android8'
+              ? 'builtin_android8'
+              : record.isoVariant === 'builtin_android9'
               ? 'builtin_android9'
               : record.isoVariant === 'builtin_eeepc'
               ? 'builtin_eeepc'
               : record.isoVariant === 'custom_file'
               ? 'custom_file'
               : 'builtin_generic';
+          const targetMode: DeviceMode =
+            record.deviceMode ??
+            (targetSource === 'builtin_android7' || targetSource === 'builtin_android8'
+              ? 'tv'
+              : config.deviceMode);
           const restoredMem: 256 | 512 | 1024 =
             record.memoryMb === 256 ? 256 : record.memoryMb === 1024 ? 1024 : 512;
           await launchVm(
             {
+              deviceMode: targetMode,
               sourceType: targetSource,
               memoryMb: restoredMem,
             },
@@ -629,7 +731,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
         setSnapshotBusy(false);
       }
     },
-    [config.memoryMb, config.sourceType, launchVm]
+    [config.deviceMode, config.memoryMb, config.sourceType, launchVm]
   );
 
   const removeSnapshot = useCallback(
@@ -701,6 +803,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
     snapshotBusy,
     launchVm,
     powerOff,
+    switchDeviceMode,
     togglePause,
     restartVm,
     sendHardwareKey,
