@@ -3,6 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -73,7 +74,7 @@ const ISO_CATALOG: Record<IsoVariantKey, IsoCatalogEntry> = {
   },
 };
 
-const CACHE_DIR = path.resolve(process.cwd(), '.cache', 'isos');
+const CACHE_DIR = path.join(os.tmpdir(), 'froyoone-isos');
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 // Remove any orphaned partial downloads left from a previous server restart

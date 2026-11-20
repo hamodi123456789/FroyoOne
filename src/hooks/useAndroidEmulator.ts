@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { V86 as V86Instance, V86Options } from 'v86';
+import type { V86 as V86Instance, V86Options } from '../types/v86';
 import {
   deleteSnapshot,
   getSnapshot,
