@@ -1,13 +1,17 @@
 import { useRef, useState } from 'react';
+import { MultiuserPanel } from './components/MultiuserPanel';
 import { NexusOneShell } from './components/NexusOneShell';
 import { SUPPORT_MODAL_STORAGE_KEY, SupportModal } from './components/SupportModal';
 import { TvMonitorShell } from './components/TvMonitorShell';
 import { WorkbenchPanel } from './components/WorkbenchPanel';
 import { useAndroidEmulator } from './hooks/useAndroidEmulator';
-import type { IsoVariant, WorkbenchTab } from './types/emulator';
+import { useMultiuserWebRtc } from './hooks/useMultiuserWebRtc';
+import type { AndroidHardwareKey, IsoVariant, WorkbenchTab } from './types/emulator';
+import { keyEventCodeToScancodes } from './utils/scancodes';
 
 const NAV_TABS: Array<{ id: WorkbenchTab; label: string }> = [
   { id: 'controls', label: 'Emulator' },
+  { id: 'multiuser', label: 'Multiuser Control' },
   { id: 'snapshots', label: 'Snapshots' },
   { id: 'console', label: 'Serial Console' },
   { id: 'images', label: 'Image Source' },
@@ -58,6 +62,10 @@ export default function App() {
     togglePause,
     restartVm,
     sendHardwareKey,
+    injectRemoteMouseMove,
+    injectRemoteMouseButton,
+    injectRemoteMouseWheel,
+    injectRemoteScancodes,
     sendKeySequence,
     sendSerialCommand,
     clearSerialLog,
@@ -72,6 +80,49 @@ export default function App() {
     importSnapshotFile,
     fetchIsoCatalog,
   } = useAndroidEmulator(screenRef);
+
+  const localOsLabel =
+    config.sourceType === 'builtin_android7'
+      ? 'Android 7.1 (Nougat)'
+      : config.sourceType === 'builtin_android8'
+      ? 'Android 8.1 (Oreo)'
+      : config.sourceType === 'builtin_android9'
+      ? 'Android 9 (Pie)'
+      : config.sourceType === 'custom_file'
+      ? config.customFile?.name || 'Custom Image'
+      : 'Android 2.2 (Froyo)';
+
+  const multiuser = useMultiuserWebRtc({
+    screenRef,
+    localDeviceMode: config.deviceMode,
+    localOsLabel,
+    localVmStatus: status,
+    onRemoteMouseMove: injectRemoteMouseMove,
+    onRemoteMouseButton: injectRemoteMouseButton,
+    onRemoteMouseWheel: injectRemoteMouseWheel,
+    onRemoteHardwareKey: sendHardwareKey,
+    onRemoteScancodes: injectRemoteScancodes,
+  });
+
+  const effectiveDeviceMode =
+    multiuser.role === 'guest' ? multiuser.hostDeviceMode : config.deviceMode;
+  const effectiveStatus =
+    multiuser.role === 'guest' ? multiuser.hostVmStatus : status;
+
+  const handleHardwareKeyDispatch = (key: AndroidHardwareKey) => {
+    if (multiuser.role === 'guest') {
+      multiuser.sendRemoteHardwareKey(key);
+    } else {
+      sendHardwareKey(key);
+    }
+  };
+
+  const handleRemoteKeyCode = (code: string, down: boolean) => {
+    const codes = keyEventCodeToScancodes(code, down);
+    if (codes.length > 0) {
+      multiuser.sendRemoteScancodes(codes);
+    }
+  };
 
   const isActive =
     status === 'preparing_image' ||
@@ -156,7 +207,15 @@ export default function App() {
                 />
               </svg>
             </a>
-            {isActive ? (
+            {multiuser.role === 'guest' ? (
+              <button
+                type="button"
+                onClick={() => multiuser.leaveRoom()}
+                className="px-4 py-2 rounded-lg bg-[#1C222B] hover:bg-red-500/20 border border-white/10 hover:border-red-500/40 text-xs font-semibold text-[#F1F5F9] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Leave Server
+              </button>
+            ) : isActive ? (
               <button
                 type="button"
                 onClick={() => void powerOff()}
@@ -202,19 +261,19 @@ export default function App() {
       {/* Main Two-Zone Emulator Studio */}
       <main
         className={`flex-1 w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center ${
-          config.deviceMode === 'tv' ? 'max-w-[1440px]' : 'max-w-[1360px]'
+          effectiveDeviceMode === 'tv' ? 'max-w-[1440px]' : 'max-w-[1360px]'
         }`}
       >
         {/* Left Stage: Phone Chassis (5 cols) or 16:9 Android TV Monitor (7 cols) */}
         <div
           className={`${
-            config.deviceMode === 'tv' ? 'lg:col-span-7' : 'lg:col-span-5'
+            effectiveDeviceMode === 'tv' ? 'lg:col-span-7' : 'lg:col-span-5'
           } flex justify-center`}
         >
-          {config.deviceMode === 'tv' ? (
+          {effectiveDeviceMode === 'tv' ? (
             <TvMonitorShell
               screenRef={screenRef}
-              status={status}
+              status={effectiveStatus}
               statusDetail={statusDetail}
               errorMessage={errorMessage}
               sourceType={config.sourceType}
@@ -222,6 +281,14 @@ export default function App() {
               downloadProgress={downloadProgress}
               displayInfo={displayInfo}
               pointerLocked={pointerLocked}
+              multiuserRole={multiuser.role}
+              remoteStream={multiuser.remoteStream}
+              remoteCursors={multiuser.remoteCursors}
+              onLocalCursorMove={multiuser.sendLocalCursor}
+              onRemoteMouseMove={multiuser.sendRemoteMouseMove}
+              onRemoteMouseButton={multiuser.sendRemoteMouseButton}
+              onRemoteMouseWheel={multiuser.sendRemoteMouseWheel}
+              onRemoteKeyCode={handleRemoteKeyCode}
               onBoot={() => void launchVm()}
               onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
               onSelectSourceType={(sourceType) =>
@@ -241,19 +308,27 @@ export default function App() {
                   customMediaKind: isDiskImg ? 'hda' : 'cdrom',
                 }));
               }}
-              onHardwareKey={sendHardwareKey}
+              onHardwareKey={handleHardwareKeyDispatch}
               onLockPointer={lockPointer}
             />
           ) : (
             <NexusOneShell
               screenRef={screenRef}
-              status={status}
+              status={effectiveStatus}
               statusDetail={statusDetail}
               errorMessage={errorMessage}
               sourceType={config.sourceType}
               downloadProgress={downloadProgress}
               displayInfo={displayInfo}
               pointerLocked={pointerLocked}
+              multiuserRole={multiuser.role}
+              remoteStream={multiuser.remoteStream}
+              remoteCursors={multiuser.remoteCursors}
+              onLocalCursorMove={multiuser.sendLocalCursor}
+              onRemoteMouseMove={multiuser.sendRemoteMouseMove}
+              onRemoteMouseButton={multiuser.sendRemoteMouseButton}
+              onRemoteMouseWheel={multiuser.sendRemoteMouseWheel}
+              onRemoteKeyCode={handleRemoteKeyCode}
               onBoot={() => void launchVm()}
               onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
               onSelectSourceType={(sourceType) =>
@@ -263,18 +338,45 @@ export default function App() {
                   vgaMemoryMb: sourceType === 'builtin_android9' ? 32 : prev.vgaMemoryMb,
                 }))
               }
-              onHardwareKey={sendHardwareKey}
+              onHardwareKey={handleHardwareKeyDispatch}
               onLockPointer={lockPointer}
             />
           )}
         </div>
 
-        {/* Right Deck: Workbench Controls, Snapshots, Serial Console, Image Manager */}
-        <div className={config.deviceMode === 'tv' ? 'lg:col-span-5' : 'lg:col-span-7'}>
+        {/* Right Deck: Workbench Controls, Multiuser Control, Snapshots, Serial Console, Image Manager */}
+        <div className={effectiveDeviceMode === 'tv' ? 'lg:col-span-5' : 'lg:col-span-7'}>
           <WorkbenchPanel
             activeTab={activeTab}
             status={status}
             statusDetail={statusDetail}
+            multiuserRole={multiuser.role}
+            multiuserServerName={multiuser.activeRoom?.serverName ?? null}
+            multiuserContent={
+              <MultiuserPanel
+                username={multiuser.username}
+                onSaveUsername={multiuser.saveUsername}
+                signalingConnected={multiuser.signalingConnected}
+                rooms={multiuser.rooms}
+                roomsLoading={multiuser.roomsLoading}
+                onRefreshRooms={() => void multiuser.refreshRooms()}
+                role={multiuser.role}
+                connectionState={multiuser.connectionState}
+                activeRoom={multiuser.activeRoom}
+                myPeerId={multiuser.myPeerId}
+                participants={multiuser.participants}
+                chatMessages={multiuser.chatMessages}
+                localDeviceMode={config.deviceMode}
+                localOsLabel={localOsLabel}
+                errorMessage={multiuser.errorMessage}
+                joinError={multiuser.joinError}
+                onClearJoinError={multiuser.clearJoinError}
+                onCreateServer={multiuser.createServer}
+                onJoinServer={multiuser.joinServer}
+                onLeaveRoom={() => multiuser.leaveRoom()}
+                onSendChat={multiuser.sendChatMessage}
+              />
+            }
             config={config}
             setConfig={setConfig}
             isoCatalog={isoCatalog}
@@ -291,7 +393,7 @@ export default function App() {
             onSelectDeviceMode={(mode) => void switchDeviceMode(mode)}
             onTogglePause={() => void togglePause()}
             onRestart={restartVm}
-            onHardwareKey={sendHardwareKey}
+            onHardwareKey={handleHardwareKeyDispatch}
             onKeySequence={(keys) => void sendKeySequence(keys)}
             onLockPointer={lockPointer}
             onToggleMouse={toggleMouseInput}

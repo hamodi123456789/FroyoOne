@@ -18,8 +18,11 @@ import type {
   DeviceMode,
   EmulatorDisplayInfo,
   EmulatorStatus,
+  MultiuserRole,
+  RemoteCursorState,
 } from '../types/emulator';
 import { HARDWARE_KEY_DESCRIPTIONS } from '../utils/scancodes';
+import { RemoteCursorsOverlay } from './RemoteCursorsOverlay';
 
 interface TvMonitorShellProps {
   screenRef: React.RefObject<HTMLDivElement | null>;
@@ -31,6 +34,14 @@ interface TvMonitorShellProps {
   downloadProgress: { loaded: number; total: number; label: string } | null;
   displayInfo: EmulatorDisplayInfo;
   pointerLocked: boolean;
+  multiuserRole: MultiuserRole;
+  remoteStream: MediaStream | null;
+  remoteCursors: RemoteCursorState[];
+  onLocalCursorMove: (x: number, y: number, visible: boolean) => void;
+  onRemoteMouseMove: (x: number, y: number) => void;
+  onRemoteMouseButton: (button: 'left' | 'middle' | 'right', down: boolean, x: number, y: number) => void;
+  onRemoteMouseWheel: (deltaY: number) => void;
+  onRemoteKeyCode: (code: string, down: boolean) => void;
   onBoot: () => void;
   onSelectDeviceMode: (mode: DeviceMode) => void;
   onSelectSourceType: (source: BootSourceType) => void;
@@ -84,6 +95,14 @@ export function TvMonitorShell({
   downloadProgress,
   displayInfo,
   pointerLocked,
+  multiuserRole,
+  remoteStream,
+  remoteCursors,
+  onLocalCursorMove,
+  onRemoteMouseMove,
+  onRemoteMouseButton,
+  onRemoteMouseWheel,
+  onRemoteKeyCode,
   onBoot,
   onSelectDeviceMode,
   onSelectSourceType,
@@ -92,8 +111,20 @@ export function TvMonitorShell({
   onLockPointer,
 }: TvMonitorShellProps) {
   const viewportBoxRef = useRef<HTMLDivElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const customFileInputRef = useRef<HTMLInputElement | null>(null);
   const [activeKey, setActiveKey] = useState<AndroidHardwareKey | null>(null);
+
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    if (!video) return;
+    if (multiuserRole === 'guest' && remoteStream) {
+      video.srcObject = remoteStream;
+      void video.play().catch(() => {});
+    } else {
+      video.srcObject = null;
+    }
+  }, [multiuserRole, remoteStream]);
 
   useEffect(() => {
     const viewport = viewportBoxRef.current;
@@ -130,11 +161,25 @@ export function TvMonitorShell({
     window.setTimeout(() => setActiveKey((curr) => (curr === key ? null : curr)), 140);
   };
 
+  const isGuest = multiuserRole === 'guest';
   const isVmActive = status === 'booting' || status === 'running' || status === 'paused';
+  const controlsEnabled = isGuest || isVmActive;
   const progressPct =
     downloadProgress && downloadProgress.total > 0
       ? Math.min(100, Math.round((downloadProgress.loaded / downloadProgress.total) * 100))
       : 0;
+
+  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = (remoteVideoRef.current || viewportBoxRef.current)?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0.5, y: 0.5 };
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const mapMouseButton = (btn: number): 'left' | 'middle' | 'right' =>
+    btn === 1 ? 'middle' : btn === 2 ? 'right' : 'left';
 
   const meta = getTvVersionMeta(sourceType, customFile);
 
@@ -145,21 +190,84 @@ export function TvMonitorShell({
         {/* 16:9 Display Panel */}
         <div
           ref={viewportBoxRef}
-          className="relative w-full aspect-video rounded-[10px] bg-black border border-white/12 overflow-hidden shadow-[inset_0_0_0_1px_rgba(0,0,0,0.9)]"
+          tabIndex={isGuest ? 0 : undefined}
+          onMouseMove={(e) => {
+            if (multiuserRole === 'none') return;
+            const { x, y } = getNormalizedCoords(e);
+            onLocalCursorMove(x, y, true);
+            if (isGuest) onRemoteMouseMove(x, y);
+          }}
+          onMouseLeave={() => {
+            if (multiuserRole !== 'none') onLocalCursorMove(0, 0, false);
+          }}
+          onMouseDown={(e) => {
+            if (!isGuest) return;
+            e.currentTarget.focus();
+            const { x, y } = getNormalizedCoords(e);
+            onRemoteMouseButton(mapMouseButton(e.button), true, x, y);
+          }}
+          onMouseUp={(e) => {
+            if (!isGuest) return;
+            const { x, y } = getNormalizedCoords(e);
+            onRemoteMouseButton(mapMouseButton(e.button), false, x, y);
+          }}
+          onWheel={(e) => {
+            if (isGuest) onRemoteMouseWheel(e.deltaY);
+          }}
+          onKeyDown={(e) => {
+            if (!isGuest) return;
+            e.preventDefault();
+            onRemoteKeyCode(e.code, true);
+          }}
+          onKeyUp={(e) => {
+            if (!isGuest) return;
+            e.preventDefault();
+            onRemoteKeyCode(e.code, false);
+          }}
+          onContextMenu={(e) => {
+            if (isGuest) e.preventDefault();
+          }}
+          className="relative w-full aspect-video rounded-[10px] bg-black border border-white/12 overflow-hidden shadow-[inset_0_0_0_1px_rgba(0,0,0,0.9)] focus:outline-none focus:ring-1 focus:ring-[#A4C639]"
         >
           {/* Real v86 VGA/SVGA output container */}
           <div
             ref={screenRef}
             onClick={() => {
-              if (status === 'running') {
+              if (!isGuest && status === 'running') {
                 onLockPointer();
               }
             }}
-            className="v86-screen-host cursor-crosshair"
+            className={`v86-screen-host cursor-crosshair ${isGuest ? 'hidden' : ''}`}
           />
 
+          {/* WebRTC Guest Remote Video Stream */}
+          {isGuest && (
+            <div className="absolute inset-0 z-10 bg-black flex items-center justify-center">
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-contain cursor-crosshair select-none"
+              />
+              {!remoteStream && (
+                <div className="absolute inset-0 bg-[#0A0D12]/90 flex flex-col items-center justify-center p-6 text-center space-y-2">
+                  <p className="text-sm font-medium text-[#F1F5F9]">
+                    Connecting WebRTC Stream
+                  </p>
+                  <p className="text-xs text-[#94A3B8]">
+                    Waiting for host video frames over peer-to-peer connection...
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Live multiuser remote cursor markers */}
+          {multiuserRole !== 'none' && <RemoteCursorsOverlay cursors={remoteCursors} />}
+
           {/* Idle / Preparing / Error overlay inside the TV screen */}
-          {!isVmActive && (
+          {!isGuest && !isVmActive && (
             <div className="absolute inset-0 bg-[#0A0D12]/95 flex flex-col items-center justify-center p-5 sm:p-7 text-center z-10 overflow-y-auto">
               {status === 'preparing_image' ? (
                 <div className="w-full max-w-[340px] space-y-4">
@@ -302,7 +410,7 @@ export function TvMonitorShell({
           )}
 
           {/* Subtle pause overlay */}
-          {status === 'paused' && (
+          {!isGuest && status === 'paused' && (
             <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
               <span className="px-3 py-1.5 rounded-md bg-[#161B22]/90 border border-white/15 text-xs font-medium text-[#F1F5F9]">
                 Execution Paused
@@ -355,7 +463,7 @@ export function TvMonitorShell({
             <button
               key={key}
               type="button"
-              disabled={!isVmActive}
+              disabled={!controlsEnabled}
               onClick={() => triggerKey(key)}
               title={HARDWARE_KEY_DESCRIPTIONS[key]}
               aria-label={`TV ${label}`}
@@ -375,7 +483,7 @@ export function TvMonitorShell({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('trackball_left')}
             title={HARDWARE_KEY_DESCRIPTIONS.trackball_left}
             aria-label="D-Pad Left"
@@ -386,7 +494,7 @@ export function TvMonitorShell({
           <div className="flex flex-col gap-1">
             <button
               type="button"
-              disabled={!isVmActive}
+              disabled={!controlsEnabled}
               onClick={() => triggerKey('trackball_up')}
               title={HARDWARE_KEY_DESCRIPTIONS.trackball_up}
               aria-label="D-Pad Up"
@@ -396,7 +504,7 @@ export function TvMonitorShell({
             </button>
             <button
               type="button"
-              disabled={!isVmActive}
+              disabled={!controlsEnabled}
               onClick={() => triggerKey('trackball_press')}
               title={HARDWARE_KEY_DESCRIPTIONS.trackball_press}
               aria-label="D-Pad OK"
@@ -410,7 +518,7 @@ export function TvMonitorShell({
             </button>
             <button
               type="button"
-              disabled={!isVmActive}
+              disabled={!controlsEnabled}
               onClick={() => triggerKey('trackball_down')}
               title={HARDWARE_KEY_DESCRIPTIONS.trackball_down}
               aria-label="D-Pad Down"
@@ -421,7 +529,7 @@ export function TvMonitorShell({
           </div>
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('trackball_right')}
             title={HARDWARE_KEY_DESCRIPTIONS.trackball_right}
             aria-label="D-Pad Right"
@@ -435,7 +543,7 @@ export function TvMonitorShell({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('volume_down')}
             title={HARDWARE_KEY_DESCRIPTIONS.volume_down}
             aria-label="TV Volume Down"
@@ -445,7 +553,7 @@ export function TvMonitorShell({
           </button>
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('volume_up')}
             title={HARDWARE_KEY_DESCRIPTIONS.volume_up}
             aria-label="TV Volume Up"
@@ -455,7 +563,7 @@ export function TvMonitorShell({
           </button>
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('search')}
             title={HARDWARE_KEY_DESCRIPTIONS.search}
             aria-label="TV Search"
@@ -469,7 +577,9 @@ export function TvMonitorShell({
       {/* Interaction Hint */}
       <div className="mt-3 flex items-center gap-2 text-xs text-[#94A3B8]">
         <MousePointerClick className="w-3.5 h-3.5 text-[#A4C639]" />
-        {pointerLocked ? (
+        {isGuest ? (
+          <span>WebRTC Shared Control · Click monitor & type or use D-Pad remote keys</span>
+        ) : pointerLocked ? (
           <span>Pointer captured inside Android TV · Press Esc to release</span>
         ) : isVmActive ? (
           <span>Click inside monitor to steer pointer · D-Pad remote keys active</span>

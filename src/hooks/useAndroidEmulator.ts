@@ -82,6 +82,7 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
   const serialBufferRef = useRef<string>('');
   const serialIdRef = useRef<number>(1);
   const lastCounterRef = useRef<number>(0);
+  const remoteMouseButtonsRef = useRef<[boolean, boolean, boolean]>([false, false, false]);
 
   const [status, setStatus] = useState<EmulatorStatus>('idle');
   const [statusDetail, setStatusDetail] = useState<string>('Ready to boot Android 2.2 (Froyo)');
@@ -555,6 +556,45 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
     []
   );
 
+  const injectRemoteMouseMove = useCallback((normX: number, normY: number) => {
+    const vm = emulatorRef.current as (V86Instance & { bus?: { send: (ev: string, data: unknown) => void } }) | null;
+    if (!vm?.bus) return;
+    const x = Math.max(0, Math.min(1, normX));
+    const y = Math.max(0, Math.min(1, normY));
+    vm.bus.send('mouse-absolute', [Math.round(x * 1000), Math.round(y * 1000), 1000, 1000]);
+  }, []);
+
+  const injectRemoteMouseButton = useCallback(
+    (button: 'left' | 'middle' | 'right', down: boolean, normX: number, normY: number) => {
+      const vm = emulatorRef.current as (V86Instance & { bus?: { send: (ev: string, data: unknown) => void } }) | null;
+      if (!vm?.bus) return;
+      const x = Math.max(0, Math.min(1, normX));
+      const y = Math.max(0, Math.min(1, normY));
+      vm.bus.send('mouse-absolute', [Math.round(x * 1000), Math.round(y * 1000), 1000, 1000]);
+      const idx = button === 'left' ? 0 : button === 'middle' ? 1 : 2;
+      const next: [boolean, boolean, boolean] = [...remoteMouseButtonsRef.current];
+      next[idx] = down;
+      remoteMouseButtonsRef.current = next;
+      vm.bus.send('mouse-click', next);
+    },
+    []
+  );
+
+  const injectRemoteMouseWheel = useCallback((deltaY: number) => {
+    const vm = emulatorRef.current as (V86Instance & { bus?: { send: (ev: string, data: unknown) => void } }) | null;
+    if (!vm?.bus) return;
+    const step = deltaY > 0 ? -1 : deltaY < 0 ? 1 : 0;
+    if (step !== 0) {
+      vm.bus.send('mouse-wheel', [step, 0]);
+    }
+  }, []);
+
+  const injectRemoteScancodes = useCallback((codes: number[]) => {
+    const vm = emulatorRef.current;
+    if (!vm || codes.length === 0) return;
+    vm.keyboard_send_scancodes(codes);
+  }, []);
+
   const sendKeySequence = useCallback(async (keys: AndroidHardwareKey[]) => {
     const vm = emulatorRef.current;
     if (!vm) return;
@@ -807,6 +847,10 @@ export function useAndroidEmulator(screenRef: React.RefObject<HTMLDivElement | n
     togglePause,
     restartVm,
     sendHardwareKey,
+    injectRemoteMouseMove,
+    injectRemoteMouseButton,
+    injectRemoteMouseWheel,
+    injectRemoteScancodes,
     sendKeySequence,
     sendSerialCommand,
     clearSerialLog,

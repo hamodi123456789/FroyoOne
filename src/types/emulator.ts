@@ -18,7 +18,7 @@ export type BootSourceType =
   | 'builtin_android9'
   | 'custom_file';
 
-export type WorkbenchTab = 'controls' | 'snapshots' | 'console' | 'images';
+export type WorkbenchTab = 'controls' | 'multiuser' | 'snapshots' | 'console' | 'images';
 
 export type AndroidHardwareKey =
   | 'back'
@@ -86,3 +86,107 @@ export interface EmulatorConfig {
   customFile: File | null;
   customMediaKind: 'cdrom' | 'hda';
 }
+
+export type MultiuserRole = 'none' | 'host' | 'guest';
+
+export type MultiuserConnectionState =
+  | 'idle'
+  | 'creating'
+  | 'joining'
+  | 'connecting_p2p'
+  | 'connected'
+  | 'error';
+
+export interface MultiuserRoomSummary {
+  roomId: string;
+  serverName: string;
+  hostName: string;
+  hasPassword: boolean;
+  deviceMode: DeviceMode;
+  osLabel: string;
+  peerCount: number;
+  createdAt: number;
+}
+
+export interface MultiuserParticipant {
+  peerId: string;
+  username: string;
+  role: 'host' | 'guest';
+  color: string;
+}
+
+export interface RemoteCursorState {
+  peerId: string;
+  username: string;
+  color: string;
+  x: number;
+  y: number;
+  visible: boolean;
+  updatedAt: number;
+}
+
+export interface MultiuserChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+  text: string;
+  timestamp: number;
+  system?: boolean;
+}
+
+export type MultiuserDataMessage =
+  | {
+      type: 'room_state';
+      participants: MultiuserParticipant[];
+      deviceMode: DeviceMode;
+      osLabel: string;
+      vmStatus: EmulatorStatus;
+    }
+  | {
+      type: 'profile_update';
+      username: string;
+    }
+  | {
+      type: 'cursor';
+      peerId?: string;
+      username?: string;
+      color?: string;
+      x: number;
+      y: number;
+      visible: boolean;
+    }
+  | {
+      type: 'input_mouse_move';
+      x: number;
+      y: number;
+    }
+  | {
+      type: 'input_mouse_button';
+      button: 'left' | 'middle' | 'right';
+      down: boolean;
+      x: number;
+      y: number;
+    }
+  | {
+      type: 'input_mouse_wheel';
+      deltaY: number;
+    }
+  | {
+      type: 'input_hw_key';
+      key: AndroidHardwareKey;
+    }
+  | {
+      type: 'input_scancodes';
+      codes: number[];
+    }
+  | {
+      type: 'chat';
+      id: string;
+      senderId: string;
+      senderName: string;
+      senderColor: string;
+      text: string;
+      timestamp: number;
+    };
+

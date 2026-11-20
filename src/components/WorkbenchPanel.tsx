@@ -26,6 +26,7 @@ import type {
   EmulatorStatus,
   IsoVariant,
   IsoVariantStatus,
+  MultiuserRole,
   SerialLogEntry,
   VmSnapshotMeta,
   WorkbenchTab,
@@ -35,6 +36,9 @@ interface WorkbenchPanelProps {
   activeTab: WorkbenchTab;
   status: EmulatorStatus;
   statusDetail: string;
+  multiuserRole: MultiuserRole;
+  multiuserServerName: string | null;
+  multiuserContent: React.ReactNode;
   config: EmulatorConfig;
   setConfig: React.Dispatch<React.SetStateAction<EmulatorConfig>>;
   isoCatalog: Record<IsoVariant, IsoVariantStatus> | null;
@@ -89,6 +93,9 @@ export function WorkbenchPanel({
   activeTab,
   status,
   statusDetail,
+  multiuserRole,
+  multiuserServerName,
+  multiuserContent,
   config,
   setConfig,
   isoCatalog,
@@ -130,7 +137,9 @@ export function WorkbenchPanel({
   const snapshotFileRef = useRef<HTMLInputElement | null>(null);
   const customIsoFileRef = useRef<HTMLInputElement | null>(null);
 
+  const isGuest = multiuserRole === 'guest';
   const isVmActive = status === 'booting' || status === 'running' || status === 'paused';
+  const hardwareKeysActive = isGuest || isVmActive;
 
   useEffect(() => {
     if (autoScroll && serialViewportRef.current) {
@@ -185,7 +194,9 @@ export function WorkbenchPanel({
           <div className="flex items-center gap-2 text-xs text-[#94A3B8]">
             <span
               className={`font-medium ${
-                status === 'running'
+                isGuest
+                  ? 'text-[#A4C639]'
+                  : status === 'running'
                   ? 'text-[#A4C639]'
                   : status === 'error'
                   ? 'text-red-400'
@@ -194,7 +205,9 @@ export function WorkbenchPanel({
                   : 'text-[#CBD5E1]'
               }`}
             >
-              {status === 'idle'
+              {isGuest
+                ? 'WebRTC Guest'
+                : status === 'idle'
                 ? 'Powered Off'
                 : status === 'preparing_image'
                 ? 'Caching Image'
@@ -207,7 +220,11 @@ export function WorkbenchPanel({
                 : 'Fault'}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="truncate">{statusDetail}</span>
+            <span className="truncate">
+              {isGuest
+                ? `Connected to ${multiuserServerName || 'remote server'}`
+                : statusDetail}
+            </span>
           </div>
         </div>
 
@@ -336,7 +353,7 @@ export function WorkbenchPanel({
                   <button
                     key={key}
                     type="button"
-                    disabled={!isVmActive}
+                    disabled={!hardwareKeysActive}
                     onClick={() => onHardwareKey(key)}
                     className="px-3 py-2 rounded-lg bg-[#1C222B] hover:bg-[#252D39] border border-white/8 text-xs font-mono text-[#E2E8F0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
@@ -479,6 +496,8 @@ export function WorkbenchPanel({
             </div>
           </div>
         )}
+
+        {activeTab === 'multiuser' && multiuserContent}
 
         {activeTab === 'snapshots' && (
           <div className="space-y-5">

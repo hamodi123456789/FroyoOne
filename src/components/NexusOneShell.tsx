@@ -17,8 +17,11 @@ import type {
   DeviceMode,
   EmulatorDisplayInfo,
   EmulatorStatus,
+  MultiuserRole,
+  RemoteCursorState,
 } from '../types/emulator';
 import { HARDWARE_KEY_DESCRIPTIONS } from '../utils/scancodes';
+import { RemoteCursorsOverlay } from './RemoteCursorsOverlay';
 
 interface NexusOneShellProps {
   screenRef: React.RefObject<HTMLDivElement | null>;
@@ -29,6 +32,14 @@ interface NexusOneShellProps {
   downloadProgress: { loaded: number; total: number; label: string } | null;
   displayInfo: EmulatorDisplayInfo;
   pointerLocked: boolean;
+  multiuserRole: MultiuserRole;
+  remoteStream: MediaStream | null;
+  remoteCursors: RemoteCursorState[];
+  onLocalCursorMove: (x: number, y: number, visible: boolean) => void;
+  onRemoteMouseMove: (x: number, y: number) => void;
+  onRemoteMouseButton: (button: 'left' | 'middle' | 'right', down: boolean, x: number, y: number) => void;
+  onRemoteMouseWheel: (deltaY: number) => void;
+  onRemoteKeyCode: (code: string, down: boolean) => void;
   onBoot: () => void;
   onSelectDeviceMode: (mode: DeviceMode) => void;
   onSelectSourceType: (source: BootSourceType) => void;
@@ -49,6 +60,14 @@ export function NexusOneShell({
   downloadProgress,
   displayInfo,
   pointerLocked,
+  multiuserRole,
+  remoteStream,
+  remoteCursors,
+  onLocalCursorMove,
+  onRemoteMouseMove,
+  onRemoteMouseButton,
+  onRemoteMouseWheel,
+  onRemoteKeyCode,
   onBoot,
   onSelectDeviceMode,
   onSelectSourceType,
@@ -56,7 +75,19 @@ export function NexusOneShell({
   onLockPointer,
 }: NexusOneShellProps) {
   const viewportBoxRef = useRef<HTMLDivElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const [activeKey, setActiveKey] = useState<AndroidHardwareKey | null>(null);
+
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    if (!video) return;
+    if (multiuserRole === 'guest' && remoteStream) {
+      video.srcObject = remoteStream;
+      void video.play().catch(() => {});
+    } else {
+      video.srcObject = null;
+    }
+  }, [multiuserRole, remoteStream]);
 
   // Dynamically scale VGA text-mode <div> inside v86 screen_container so 80-col BIOS/ISOLINUX text fits cleanly
   useEffect(() => {
@@ -94,11 +125,25 @@ export function NexusOneShell({
     window.setTimeout(() => setActiveKey((curr) => (curr === key ? null : curr)), 140);
   };
 
+  const isGuest = multiuserRole === 'guest';
   const isVmActive = status === 'booting' || status === 'running' || status === 'paused';
+  const controlsEnabled = isGuest || isVmActive;
   const progressPct =
     downloadProgress && downloadProgress.total > 0
       ? Math.min(100, Math.round((downloadProgress.loaded / downloadProgress.total) * 100))
       : 0;
+
+  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = (remoteVideoRef.current || viewportBoxRef.current)?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0.5, y: 0.5 };
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const mapMouseButton = (btn: number): 'left' | 'middle' | 'right' =>
+    btn === 1 ? 'middle' : btn === 2 ? 'right' : 'left';
 
   return (
     <div className="flex flex-col items-center justify-center select-none">
@@ -108,7 +153,7 @@ export function NexusOneShell({
         <div className="hidden sm:flex flex-col gap-1 -mr-[2px] z-0">
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('volume_up')}
             title={HARDWARE_KEY_DESCRIPTIONS.volume_up}
             aria-label="Volume Up"
@@ -118,7 +163,7 @@ export function NexusOneShell({
           </button>
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('volume_down')}
             title={HARDWARE_KEY_DESCRIPTIONS.volume_down}
             aria-label="Volume Down"
@@ -133,7 +178,7 @@ export function NexusOneShell({
           {/* Top-edge Physical Power / Sleep button */}
           <button
             type="button"
-            disabled={!isVmActive}
+            disabled={!controlsEnabled}
             onClick={() => triggerKey('power')}
             title={HARDWARE_KEY_DESCRIPTIONS.power}
             aria-label="Hardware Power / Sleep Button"
@@ -177,24 +222,87 @@ export function NexusOneShell({
               />
             </div>
 
-            {/* 3.7" OLED Screen Viewport (scaled cleanly for real x86 framebuffer) */}
+            {/* 3.7" OLED Screen Viewport (scaled cleanly for real x86 framebuffer or WebRTC remote stream) */}
             <div
               ref={viewportBoxRef}
-              className="relative w-full aspect-[3/4] max-h-[470px] rounded-[6px] bg-black border border-white/15 overflow-hidden shadow-[inset_0_0_0_1px_rgba(0,0,0,0.9)]"
+              tabIndex={isGuest ? 0 : undefined}
+              onMouseMove={(e) => {
+                if (multiuserRole === 'none') return;
+                const { x, y } = getNormalizedCoords(e);
+                onLocalCursorMove(x, y, true);
+                if (isGuest) onRemoteMouseMove(x, y);
+              }}
+              onMouseLeave={() => {
+                if (multiuserRole !== 'none') onLocalCursorMove(0, 0, false);
+              }}
+              onMouseDown={(e) => {
+                if (!isGuest) return;
+                e.currentTarget.focus();
+                const { x, y } = getNormalizedCoords(e);
+                onRemoteMouseButton(mapMouseButton(e.button), true, x, y);
+              }}
+              onMouseUp={(e) => {
+                if (!isGuest) return;
+                const { x, y } = getNormalizedCoords(e);
+                onRemoteMouseButton(mapMouseButton(e.button), false, x, y);
+              }}
+              onWheel={(e) => {
+                if (isGuest) onRemoteMouseWheel(e.deltaY);
+              }}
+              onKeyDown={(e) => {
+                if (!isGuest) return;
+                e.preventDefault();
+                onRemoteKeyCode(e.code, true);
+              }}
+              onKeyUp={(e) => {
+                if (!isGuest) return;
+                e.preventDefault();
+                onRemoteKeyCode(e.code, false);
+              }}
+              onContextMenu={(e) => {
+                if (isGuest) e.preventDefault();
+              }}
+              className="relative w-full aspect-[3/4] max-h-[470px] rounded-[6px] bg-black border border-white/15 overflow-hidden shadow-[inset_0_0_0_1px_rgba(0,0,0,0.9)] focus:outline-none focus:ring-1 focus:ring-[#A4C639]"
             >
-              {/* Real v86 VGA/SVGA output container */}
+              {/* Real v86 VGA/SVGA output container (hidden in guest mode) */}
               <div
                 ref={screenRef}
                 onClick={() => {
-                  if (status === 'running') {
+                  if (!isGuest && status === 'running') {
                     onLockPointer();
                   }
                 }}
-                className="v86-screen-host cursor-crosshair"
+                className={`v86-screen-host cursor-crosshair ${isGuest ? 'hidden' : ''}`}
               />
 
-              {/* Non-running overlays (only shown when VM is idle, preparing image, or faulted) */}
-              {!isVmActive && (
+              {/* WebRTC Guest Remote Video Feed */}
+              {isGuest && (
+                <div className="absolute inset-0 z-10 bg-black flex items-center justify-center">
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-contain cursor-crosshair select-none"
+                  />
+                  {!remoteStream && (
+                    <div className="absolute inset-0 bg-[#0A0D12]/90 flex flex-col items-center justify-center p-6 text-center space-y-2">
+                      <p className="text-sm font-medium text-[#F1F5F9]">
+                        Connecting WebRTC Stream
+                      </p>
+                      <p className="text-xs text-[#94A3B8]">
+                        Waiting for host video frames over peer-to-peer connection...
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Live multiuser remote cursor markers */}
+              {multiuserRole !== 'none' && <RemoteCursorsOverlay cursors={remoteCursors} />}
+
+              {/* Non-running overlays (only shown locally/when host is idle, preparing image, or faulted) */}
+              {!isGuest && !isVmActive && (
                 <div className="absolute inset-0 bg-[#0A0D12]/95 flex flex-col items-center justify-center p-6 text-center z-10">
                   {status === 'preparing_image' ? (
                     <div className="w-full max-w-[260px] space-y-4">
@@ -327,7 +435,7 @@ export function NexusOneShell({
               )}
 
               {/* Subtle pause scrim */}
-              {status === 'paused' && (
+              {!isGuest && status === 'paused' && (
                 <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
                   <span className="px-3 py-1.5 rounded-md bg-[#161B22]/90 border border-white/15 text-xs font-medium text-[#F1F5F9]">
                     Execution Paused
@@ -349,7 +457,7 @@ export function NexusOneShell({
                 <button
                   key={key}
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey(key)}
                   title={HARDWARE_KEY_DESCRIPTIONS[key]}
                   aria-label={`Android ${label} Key`}
@@ -370,7 +478,7 @@ export function NexusOneShell({
                 {/* Directional ring buttons around the pearl */}
                 <button
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey('trackball_up')}
                   title={HARDWARE_KEY_DESCRIPTIONS.trackball_up}
                   aria-label="Trackball Up"
@@ -380,7 +488,7 @@ export function NexusOneShell({
                 </button>
                 <button
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey('trackball_down')}
                   title={HARDWARE_KEY_DESCRIPTIONS.trackball_down}
                   aria-label="Trackball Down"
@@ -390,7 +498,7 @@ export function NexusOneShell({
                 </button>
                 <button
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey('trackball_left')}
                   title={HARDWARE_KEY_DESCRIPTIONS.trackball_left}
                   aria-label="Trackball Left"
@@ -400,7 +508,7 @@ export function NexusOneShell({
                 </button>
                 <button
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey('trackball_right')}
                   title={HARDWARE_KEY_DESCRIPTIONS.trackball_right}
                   aria-label="Trackball Right"
@@ -412,7 +520,7 @@ export function NexusOneShell({
                 {/* Center recessed pearl trackball */}
                 <button
                   type="button"
-                  disabled={!isVmActive}
+                  disabled={!controlsEnabled}
                   onClick={() => triggerKey('trackball_press')}
                   title={HARDWARE_KEY_DESCRIPTIONS.trackball_press}
                   aria-label="Trackball Select"
@@ -435,7 +543,9 @@ export function NexusOneShell({
       {/* Concise unboxed interaction hint below device */}
       <div className="mt-3 flex items-center gap-2 text-xs text-[#94A3B8]">
         <MousePointerClick className="w-3.5 h-3.5 text-[#A4C639]" />
-        {pointerLocked ? (
+        {isGuest ? (
+          <span>WebRTC Shared Control · Click screen & type or use hardware keys</span>
+        ) : pointerLocked ? (
           <span>Pointer captured inside Android · Press Esc to release</span>
         ) : isVmActive ? (
           <span>Click inside display to steer Android cursor · Hardware keys active</span>

@@ -1,8 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { WebSocket, WebSocketServer } from 'ws';
 
 type IsoVariantKey = 'generic' | 'eeepc' | 'android7' | 'android8' | 'android9';
 
@@ -230,12 +233,294 @@ async function ensureIsoCached(variant: IsoVariantKey): Promise<void> {
   return task;
 }
 
+interface MultiuserRoomRecord {
+  roomId: string;
+  serverName: string;
+  hostPeerId: string;
+  hostName: string;
+  passwordHash: string | null;
+  deviceMode: 'phone' | 'tv';
+  osLabel: string;
+  createdAt: number;
+  peers: Map<string, WebSocket>;
+}
+
+const multiuserRooms = new Map<string, MultiuserRoomRecord>();
+const clientRegistry = new Map<WebSocket, { clientId: string; roomId: string | null }>();
+
+function hashRoomPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyRoomPassword(password: string, storedHash: string): boolean {
+  const candidate = Buffer.from(hashRoomPassword(password), 'hex');
+  const expected = Buffer.from(storedHash, 'hex');
+  if (candidate.length !== expected.length) return false;
+  return crypto.timingSafeEqual(candidate, expected);
+}
+
+function toPublicRoomSummary(room: MultiuserRoomRecord) {
+  return {
+    roomId: room.roomId,
+    serverName: room.serverName,
+    hostName: room.hostName,
+    hasPassword: room.passwordHash !== null,
+    deviceMode: room.deviceMode,
+    osLabel: room.osLabel,
+    peerCount: room.peers.size,
+    createdAt: room.createdAt,
+  };
+}
+
+function getPublicRoomsList() {
+  return Array.from(multiuserRooms.values())
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(toPublicRoomSummary);
+}
+
+function sendWsJson(ws: WebSocket, payload: unknown) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
+}
+
+function broadcastRoomsList() {
+  const payload = { type: 'rooms_list', rooms: getPublicRoomsList() };
+  for (const ws of clientRegistry.keys()) {
+    sendWsJson(ws, payload);
+  }
+}
+
+function detachClientFromCurrentRoom(ws: WebSocket, reason = 'Host closed the server') {
+  const info = clientRegistry.get(ws);
+  if (!info || !info.roomId) return;
+
+  const room = multiuserRooms.get(info.roomId);
+  info.roomId = null;
+  if (!room) return;
+
+  if (room.hostPeerId === info.clientId) {
+    for (const [peerId, peerWs] of room.peers.entries()) {
+      if (peerId !== info.clientId) {
+        const peerInfo = clientRegistry.get(peerWs);
+        if (peerInfo) peerInfo.roomId = null;
+        sendWsJson(peerWs, { type: 'room_closed', roomId: room.roomId, reason });
+      }
+    }
+    multiuserRooms.delete(room.roomId);
+  } else {
+    room.peers.delete(info.clientId);
+    const hostWs = room.peers.get(room.hostPeerId);
+    if (hostWs) {
+      sendWsJson(hostWs, { type: 'peer_left', roomId: room.roomId, peerId: info.clientId });
+    }
+  }
+
+  broadcastRoomsList();
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json());
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws/webrtc-signaling' });
+
+  wss.on('connection', (ws) => {
+    const clientId = crypto.randomUUID().slice(0, 12);
+    clientRegistry.set(ws, { clientId, roomId: null });
+
+    sendWsJson(ws, { type: 'welcome', clientId });
+    sendWsJson(ws, { type: 'rooms_list', rooms: getPublicRoomsList() });
+
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      }
+    }, 25000);
+
+    ws.on('message', (rawData) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(String(rawData)) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+
+      const clientInfo = clientRegistry.get(ws);
+      if (!clientInfo) return;
+
+      switch (msg.type) {
+        case 'list_rooms': {
+          sendWsJson(ws, { type: 'rooms_list', rooms: getPublicRoomsList() });
+          break;
+        }
+
+        case 'create_room': {
+          const rawName = typeof msg.serverName === 'string' ? msg.serverName.trim() : '';
+          if (!rawName) {
+            sendWsJson(ws, { type: 'create_error', message: 'Please enter a server name.' });
+            return;
+          }
+          const serverName = rawName.slice(0, 48);
+          const rawPassword = typeof msg.password === 'string' ? msg.password : '';
+          const hostName =
+            typeof msg.hostName === 'string' && msg.hostName.trim()
+              ? msg.hostName.trim().slice(0, 28)
+              : 'Host';
+          const deviceMode: 'phone' | 'tv' = msg.deviceMode === 'tv' ? 'tv' : 'phone';
+          const osLabel =
+            typeof msg.osLabel === 'string' && msg.osLabel.trim()
+              ? msg.osLabel.trim().slice(0, 48)
+              : 'Android 2.2';
+
+          detachClientFromCurrentRoom(ws, 'Host started a new server');
+
+          const roomId = crypto.randomUUID().slice(0, 8);
+          const room: MultiuserRoomRecord = {
+            roomId,
+            serverName,
+            hostPeerId: clientInfo.clientId,
+            hostName,
+            passwordHash: rawPassword.length > 0 ? hashRoomPassword(rawPassword) : null,
+            deviceMode,
+            osLabel,
+            createdAt: Date.now(),
+            peers: new Map([[clientInfo.clientId, ws]]),
+          };
+          multiuserRooms.set(roomId, room);
+          clientInfo.roomId = roomId;
+
+          sendWsJson(ws, {
+            type: 'room_created',
+            room: toPublicRoomSummary(room),
+            peerId: clientInfo.clientId,
+          });
+          broadcastRoomsList();
+          break;
+        }
+
+        case 'update_room_meta': {
+          if (!clientInfo.roomId) return;
+          const room = multiuserRooms.get(clientInfo.roomId);
+          if (!room || room.hostPeerId !== clientInfo.clientId) return;
+
+          if (typeof msg.hostName === 'string' && msg.hostName.trim()) {
+            room.hostName = msg.hostName.trim().slice(0, 28);
+          }
+          if (msg.deviceMode === 'phone' || msg.deviceMode === 'tv') {
+            room.deviceMode = msg.deviceMode;
+          }
+          if (typeof msg.osLabel === 'string' && msg.osLabel.trim()) {
+            room.osLabel = msg.osLabel.trim().slice(0, 48);
+          }
+          broadcastRoomsList();
+          break;
+        }
+
+        case 'join_room': {
+          const roomId = typeof msg.roomId === 'string' ? msg.roomId : '';
+          const room = multiuserRooms.get(roomId);
+          if (!room) {
+            sendWsJson(ws, {
+              type: 'join_error',
+              roomId,
+              code: 'NOT_FOUND',
+              message: 'That server is no longer online.',
+            });
+            return;
+          }
+
+          const password = typeof msg.password === 'string' ? msg.password : '';
+          if (room.passwordHash) {
+            if (!password) {
+              sendWsJson(ws, {
+                type: 'join_error',
+                roomId,
+                code: 'PASSWORD_REQUIRED',
+                message: 'This server requires a password.',
+              });
+              return;
+            }
+            if (!verifyRoomPassword(password, room.passwordHash)) {
+              sendWsJson(ws, {
+                type: 'join_error',
+                roomId,
+                code: 'INVALID_PASSWORD',
+                message: 'Incorrect server password.',
+              });
+              return;
+            }
+          }
+
+          const username =
+            typeof msg.username === 'string' && msg.username.trim()
+              ? msg.username.trim().slice(0, 28)
+              : `Guest-${clientInfo.clientId.slice(0, 4)}`;
+
+          detachClientFromCurrentRoom(ws, 'Host switched rooms');
+
+          room.peers.set(clientInfo.clientId, ws);
+          clientInfo.roomId = roomId;
+
+          sendWsJson(ws, {
+            type: 'joined_room',
+            room: toPublicRoomSummary(room),
+            peerId: clientInfo.clientId,
+            hostPeerId: room.hostPeerId,
+          });
+
+          const hostWs = room.peers.get(room.hostPeerId);
+          if (hostWs) {
+            sendWsJson(hostWs, {
+              type: 'peer_joined',
+              roomId,
+              peerId: clientInfo.clientId,
+              username,
+            });
+          }
+
+          broadcastRoomsList();
+          break;
+        }
+
+        case 'signal': {
+          const roomId = typeof msg.roomId === 'string' ? msg.roomId : clientInfo.roomId || '';
+          const targetPeerId = typeof msg.targetPeerId === 'string' ? msg.targetPeerId : '';
+          const room = multiuserRooms.get(roomId);
+          if (!room || !room.peers.has(clientInfo.clientId)) return;
+
+          const targetWs = room.peers.get(targetPeerId);
+          if (!targetWs) return;
+
+          sendWsJson(targetWs, {
+            type: 'signal',
+            roomId,
+            fromPeerId: clientInfo.clientId,
+            payload: msg.payload,
+          });
+          break;
+        }
+
+        case 'leave_room': {
+          detachClientFromCurrentRoom(ws, 'Host closed the server');
+          break;
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      clearInterval(heartbeat);
+      detachClientFromCurrentRoom(ws, 'Host disconnected');
+      clientRegistry.delete(ws);
+    });
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  app.get('/api/multiuser/rooms', (_req, res) => {
+    res.json({ rooms: getPublicRoomsList() });
   });
 
   app.get('/api/iso/status', (req, res) => {
@@ -312,7 +597,7 @@ async function startServer() {
   }
 
   const port = Number(process.env.PORT) || 3000;
-  app.listen(port, '0.0.0.0', () => {
+  httpServer.listen(port, '0.0.0.0', () => {
     console.log(`FroyoOne server listening on http://0.0.0.0:${port}`);
   });
 }
